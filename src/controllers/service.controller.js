@@ -1,77 +1,70 @@
-import Service from "../models/service.js";
+import { getCountries, getPricesByCountry } from "../services/fivesim.service.js";
+import { getUsdToNgnRate, calculateSellingPriceNaira } from "../utils/pricing.js";
 
-export const getServices = async (req, res, next) => {
+const getCheapestProviderPrice = (operators = {}) => {
+  let cheapestPrice = null;
+  let totalCount = 0;
+
+  Object.values(operators).forEach((operatorData) => {
+    const cost = Number(operatorData?.cost || 0);
+    const count = Number(operatorData?.count || 0);
+
+    totalCount += count;
+
+    if (cheapestPrice === null || cost < cheapestPrice) {
+      cheapestPrice = cost;
+    }
+  });
+
+  return {
+    cheapestPrice: cheapestPrice ?? 0,
+    totalCount
+  };
+};
+
+export const getServices = async (req, res) => {
   try {
-    const services = await Service.find({ status: "active" }).sort({ createdAt: -1 });
+    const { country } = req.query;
 
-    res.status(200).json({
-      message: "Services fetched successfully",
-      count: services.length,
+    if (!country) {
+      const countries = await getCountries();
+
+      return res.status(200).json({
+        type: "countries",
+        data: Object.keys(countries)
+      });
+    }
+
+    const normalizedCountry = String(country).trim().toLowerCase();
+    const providerData = await getPricesByCountry(normalizedCountry);
+    const countryData = providerData?.[normalizedCountry] || {};
+    const usdToNgnRate = await getUsdToNgnRate();
+
+    const services = Object.entries(countryData).map(([serviceName, operators]) => {
+      const { cheapestPrice, totalCount } = getCheapestProviderPrice(operators);
+
+      return {
+        name: serviceName,
+        country: normalizedCountry,
+        providerPriceUsd: cheapestPrice,
+        price: calculateSellingPriceNaira(cheapestPrice, usdToNgnRate),
+        currency: "NGN",
+        available: totalCount > 0,
+        count: totalCount,
+        status: totalCount > 0 ? "active" : "inactive"
+      };
+    });
+
+    return res.status(200).json({
+      type: "services",
+      exchangeRate: usdToNgnRate,
       services
     });
   } catch (error) {
-    next(error);
-  }
-};
+    console.error("SERVICE FETCH ERROR:", error.response?.data || error.message);
 
-export const createService = async (req, res, next) => {
-  try {
-    const {
-      name,
-      serviceCode,
-      country,
-      category,
-      price,
-      deliveryType,
-      status,
-      description
-    } = req.body;
-
-    if (!name || !serviceCode || !country || price === undefined) {
-      res.status(400);
-      throw new Error("Name, serviceCode, country, and price are required");
-    }
-
-    const existingService = await Service.findOne({
-      serviceCode: serviceCode.toLowerCase(),
-      country
+    return res.status(500).json({
+      message: "Failed to fetch services from provider"
     });
-
-    if (existingService) {
-      res.status(400);
-      throw new Error("Service already exists for this country");
-    }
-
-    const service = await Service.create({
-      name,
-      serviceCode,
-      country,
-      category,
-      price,
-      deliveryType,
-      status,
-      description
-    });
-
-    res.status(201).json({
-      message: "Service created successfully",
-      service
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const getAllServicesForAdmin = async (req, res, next) => {
-  try {
-    const services = await Service.find().sort({ createdAt: -1 });
-
-    res.status(200).json({
-      message: "Admin services fetched successfully",
-      count: services.length,
-      services
-    });
-  } catch (error) {
-    next(error);
   }
 };
