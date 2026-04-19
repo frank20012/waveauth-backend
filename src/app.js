@@ -4,7 +4,7 @@ import cors from "cors";
 import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import serviceRoutes from "./routes/service.routes.js";
-import orderRoutes from "./routes/order.routes.js";
+import orderRoutes from "./routes/otp.routes.js";
 import walletRoutes from "./routes/wallet.routes.js";
 import transactionRoutes from "./routes/transaction.routes.js";
 import ticketRoutes from "./routes/ticket.routes.js";
@@ -13,6 +13,8 @@ import otpOrderRoutes from "./routes/otpOrder.routes.js";
 import numberInventoryRoutes from "./routes/numberInventory.routes.js";
 import paymentRoutes from "./routes/payment.routes.js";
 import rentRoutes from "./routes/rent.routes.js";
+import providerDebugRoutes from "./routes/providerDebug.routes.js";
+import catalogRoutes from "./routes/catalog.routes.js";
 
 import notFound from "./middlewares/notfound.middleware.js";
 import errorHandler from "./middlewares/error.middleware.js";
@@ -47,6 +49,10 @@ app.use("/api/otp-orders", otpOrderRoutes);
 app.use("/api/numbers", numberInventoryRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/rent", rentRoutes);
+app.use("/api/provider-debug", providerDebugRoutes);
+app.use("/api/catalog", catalogRoutes);
+
+console.log("Routes loaded: /api/services, /api/otp, /api/rent");
 
 app.use(notFound);
 app.use(errorHandler);

@@ -2,24 +2,36 @@ import Wallet from "../models/wallet.js";
 import Transaction from "../models/transaction.js";
 import RentOrder from "../models/RentOrder.js";
 import {
-  getSmsPoolCountries,
-  getSmsPoolServices,
-  purchaseSmsPoolNumber,
-  checkSmsPoolOrder
-} from "../services/smspool.service.js";
-import { getUsdToNgnRate, calculateSellingPriceNaira } from "../utils/pricing.js";
+  getUnifiedServicePricing
+} from "../services/catalog.service.js";
+import {
+  buyRentalActivation,
+  checkRentalActivationOtp,
+  cancelRentalActivation
+} from "../services/rent.service.js";
 
 const generateRefundReference = (orderId) => {
   return `RENT-REFUND-${orderId}-${Date.now()}`;
 };
+
+const normalizeText = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/-/g, "")
+    .replace(/\./g, "");
 
 /* =========================
    GET COUNTRIES
 ========================= */
 export const getRentCountries = async (req, res) => {
   try {
-    const data = await getSmsPoolCountries();
-    return res.status(200).json({ countries: data || [] });
+    return res.status(200).json({
+      countries: [],
+      message:
+        "Country list is no longer tied to only SMSPool. Use your frontend country list for now, or later we can build a merged provider-country endpoint."
+    });
   } catch (error) {
     return res.status(500).json({
       message: "Failed to fetch rent countries"
@@ -32,7 +44,7 @@ export const getRentCountries = async (req, res) => {
 ========================= */
 export const getRentServices = async (req, res) => {
   try {
-    const { country } = req.query;
+    const { country, service } = req.query;
 
     if (!country) {
       return res.status(400).json({
@@ -40,24 +52,41 @@ export const getRentServices = async (req, res) => {
       });
     }
 
-    const [services, rate] = await Promise.all([
-      getSmsPoolServices(country),
-      getUsdToNgnRate()
-    ]);
+    if (!service) {
+      return res.status(200).json({
+        services: [],
+        message:
+          "Pass a service query too, so the backend can compare rental pricing across SMSPool, Tiger, and PVAPins."
+      });
+    }
 
-    const mapped = (services || []).map((item) => {
-      const usd = Number(item.price || 0);
+    const normalizedCountry = String(country).trim().toUpperCase();
+    const normalizedService = normalizeText(service);
 
-      return {
-        id: item.ID || item.id || item.service,
-        name: item.name || item.service,
-        providerPriceUsd: usd,
-        price: calculateSellingPriceNaira(usd, rate),
-        currency: "NGN"
-      };
+    const providerResults = await getUnifiedServicePricing({
+      country: normalizedCountry,
+      service: normalizedService,
+      type: "rental"
     });
 
-    return res.status(200).json({ services: mapped });
+    const mapped = providerResults.map((item) => ({
+      provider: item.provider,
+      id: normalizedService,
+      name: normalizedService,
+      country: normalizedCountry,
+      providerPriceUsd: Number(item.providerPriceUsd || 0),
+      price: Number(item.sellingPriceNgn || 0),
+      currency: "NGN",
+      available: Number(item.stock || 0) > 0,
+      count: Number(item.stock || 0),
+      status: Number(item.stock || 0) > 0 ? "active" : "inactive",
+      error: item.error || null
+    }));
+
+    return res.status(200).json({
+      services: mapped,
+      providers: providerResults
+    });
   } catch (error) {
     return res.status(500).json({
       message: "Failed to fetch services"
@@ -71,9 +100,12 @@ export const getRentServices = async (req, res) => {
 export const createRentOrder = async (req, res) => {
   try {
     const userId = req.user._id;
-    const { countryId, countryName, serviceId, serviceName, displayedPrice } = req.body;
+    const { countryId, countryName, serviceId, serviceName, operator } = req.body;
 
-    if (!countryId || !serviceId) {
+    const country = countryId || countryName;
+    const service = serviceId || serviceName;
+
+    if (!country || !service) {
       return res.status(400).json({
         message: "Country and service are required"
       });
@@ -87,53 +119,26 @@ export const createRentOrder = async (req, res) => {
       });
     }
 
-    const price = Number(displayedPrice || 0);
+    const order = await buyRentalActivation({
+      userId,
+      country: String(country).trim().toUpperCase(),
+      service: normalizeText(service),
+      operator: operator ? normalizeText(operator) : ""
+    });
 
-    if (!price || wallet.balance < price) {
+    const price = Number(order.price || 0);
+
+    if (wallet.balance < price) {
+      try {
+        await cancelRentalActivation(order._id);
+      } catch (err) {
+        console.log("Rollback rent cancel failed:", err.message);
+      }
+
       return res.status(400).json({
         message: "Insufficient wallet balance"
       });
     }
-
-    const providerResponse = await purchaseSmsPoolNumber({
-      country: countryId,
-      service: serviceId,
-      quantity: 1
-    });
-
-    console.log("SMSPOOL BUY RESPONSE:", providerResponse);
-
-    const orderData = Array.isArray(providerResponse)
-      ? providerResponse[0]
-      : providerResponse;
-
-    const providerOrderId =
-      orderData?.order_code ||
-      orderData?.orderid ||
-      orderData?.id;
-
-    const number =
-      orderData?.phonenumber ||
-      orderData?.number;
-
-    if (!providerOrderId || !number) {
-      return res.status(400).json({
-        message: "No number available right now"
-      });
-    }
-
-    const order = await RentOrder.create({
-      user: userId,
-      country: countryName,
-      serviceName,
-      serviceId,
-      countryId,
-      provider: "smspool",
-      providerOrderId,
-      assignedNumber: number,
-      price,
-      status: "active"
-    });
 
     wallet.balance -= price;
     await wallet.save();
@@ -145,18 +150,19 @@ export const createRentOrder = async (req, res) => {
       amount: price,
       status: "completed",
       reference: `RENT-${order._id}`,
-      description: `Rent number for ${serviceName} (${countryName})`
+      description: `Rent number for ${serviceName || service} (${countryName || country})`
     });
 
     return res.status(201).json({
       message: "Number rented successfully",
-      order
+      order,
+      walletBalance: wallet.balance
     });
   } catch (error) {
     console.log("RENT ERROR:", error.message);
 
     return res.status(500).json({
-      message: "Failed to rent number"
+      message: error.message || "Failed to rent number"
     });
   }
 };
@@ -192,17 +198,10 @@ export const checkRentOrderStatus = async (req, res) => {
       });
     }
 
-    const providerData = await checkSmsPoolOrder(order.providerOrderId);
-
-    if (providerData?.sms || providerData?.code) {
-      order.otpCode = String(providerData.sms || providerData.code);
-      order.status = "completed";
-    }
-
-    await order.save();
+    const updatedOrder = await checkRentalActivationOtp(order._id);
 
     return res.status(200).json({
-      order
+      order: updatedOrder
     });
   } catch (error) {
     return res.status(500).json({
@@ -239,32 +238,41 @@ export const cancelRentOrder = async (req, res) => {
 
     const wallet = await Wallet.findOne({ user: req.user._id });
 
-    const shouldRefund = !order.otpCode;
+    if (!wallet) {
+      return res.status(404).json({
+        message: "Wallet not found"
+      });
+    }
+
+    const { order: cancelledOrder, providerResult } =
+      await cancelRentalActivation(order._id);
+
+    const shouldRefund =
+      providerResult.success && !cancelledOrder.otpCode;
 
     if (shouldRefund) {
-      wallet.balance += Number(order.price || 0);
+      wallet.balance += Number(cancelledOrder.price || 0);
       await wallet.save();
 
       await Transaction.create({
         user: req.user._id,
         wallet: wallet._id,
         type: "refund",
-        amount: Number(order.price || 0),
+        amount: Number(cancelledOrder.price || 0),
         status: "completed",
-        reference: generateRefundReference(order._id),
-        description: `Refund for cancelled rent order (${order.serviceName})`
+        reference: generateRefundReference(cancelledOrder._id),
+        description: `Refund for cancelled rent order (${cancelledOrder.serviceName})`
       });
     }
-
-    order.status = "cancelled";
-    await order.save();
 
     return res.json({
       message: shouldRefund
         ? "Order cancelled and refunded"
         : "Order cancelled",
       refunded: shouldRefund,
-      order
+      providerCancelWorked: providerResult.success,
+      order: cancelledOrder,
+      walletBalance: wallet.balance
     });
   } catch (error) {
     console.log("CANCEL RENT ERROR:", error.message);

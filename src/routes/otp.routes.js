@@ -5,7 +5,7 @@ import {
   getMyOtpOrders,
   checkOtpOrderStatus,
   cancelOtpOrder
-} from "../controllers/order.controller.js";
+} from "../controllers/otp.controller.js";
 
 const router = express.Router();
 

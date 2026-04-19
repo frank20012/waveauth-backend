@@ -1,70 +1,95 @@
-import { getCountries, getPricesByCountry } from "../services/fivesim.service.js";
-import { getUsdToNgnRate, calculateSellingPriceNaira } from "../utils/pricing.js";
-
-const getCheapestProviderPrice = (operators = {}) => {
-  let cheapestPrice = null;
-  let totalCount = 0;
-
-  Object.values(operators).forEach((operatorData) => {
-    const cost = Number(operatorData?.cost || 0);
-    const count = Number(operatorData?.count || 0);
-
-    totalCount += count;
-
-    if (cheapestPrice === null || cost < cheapestPrice) {
-      cheapestPrice = cost;
-    }
-  });
-
-  return {
-    cheapestPrice: cheapestPrice ?? 0,
-    totalCount
-  };
-};
+import { getUnifiedServicePricing } from "../services/catalog.service.js";
 
 export const getServices = async (req, res) => {
   try {
-    const { country } = req.query;
+    const { country, service, type } = req.query;
 
     if (!country) {
-      const countries = await getCountries();
-
       return res.status(200).json({
+        success: true,
         type: "countries",
-        data: Object.keys(countries)
+        message:
+          "Country list is no longer coming from FiveSim. Use the merged catalog endpoint instead.",
+        data: []
       });
     }
 
-    const normalizedCountry = String(country).trim().toLowerCase();
-    const providerData = await getPricesByCountry(normalizedCountry);
-    const countryData = providerData?.[normalizedCountry] || {};
-    const usdToNgnRate = await getUsdToNgnRate();
+    const normalizedCountry = String(country).trim().toUpperCase();
 
-    const services = Object.entries(countryData).map(([serviceName, operators]) => {
-      const { cheapestPrice, totalCount } = getCheapestProviderPrice(operators);
-
-      return {
-        name: serviceName,
+    if (!service) {
+      return res.status(200).json({
+        success: true,
+        type: "services",
         country: normalizedCountry,
-        providerPriceUsd: cheapestPrice,
-        price: calculateSellingPriceNaira(cheapestPrice, usdToNgnRate),
-        currency: "NGN",
-        available: totalCount > 0,
-        count: totalCount,
-        status: totalCount > 0 ? "active" : "inactive"
-      };
+        message:
+          "Service name is required to compare provider pricing across SMSPool, Tiger, and PVAPins.",
+        services: []
+      });
+    }
+
+    const normalizedService = String(service).trim().toLowerCase();
+    const normalizedType =
+      String(type || "temporary").trim().toLowerCase() === "rental"
+        ? "rental"
+        : "temporary";
+
+    const providerResults = await getUnifiedServicePricing({
+      country: normalizedCountry,
+      service: normalizedService,
+      type: normalizedType
     });
 
+    const pricedAvailableProviders = providerResults.filter(
+      (item) =>
+        !item.error &&
+        Number(item.stock || 0) > 0 &&
+        Boolean(item.hasValidPrice)
+    );
+
+    const cheapestProvider =
+      pricedAvailableProviders.length > 0 ? pricedAvailableProviders[0] : null;
+
+    const services = providerResults.map((item) => ({
+      provider: item.provider,
+      name: normalizedService,
+      country: normalizedCountry,
+      type: normalizedType,
+      providerPrice: Number(item.providerPrice || 0),
+      providerCurrency: String(item.providerCurrency || "USD").toUpperCase(),
+      providerPriceDisplay:
+        Number(item.providerPrice || 0) > 0
+          ? `${Number(item.providerPrice).toFixed(2)} ${String(
+              item.providerCurrency || "USD"
+            ).toUpperCase()}`
+          : null,
+      price: Boolean(item.hasValidPrice)
+        ? Number(item.sellingPriceNgn || 0)
+        : null,
+      currency: "NGN",
+      available: Number(item.stock || 0) > 0,
+      count: Number(item.stock || 0),
+      status: Number(item.stock || 0) > 0 ? "active" : "inactive",
+      hasValidPrice: Boolean(item.hasValidPrice),
+      error: item.error || null
+    }));
+
     return res.status(200).json({
+      success: true,
       type: "services",
-      exchangeRate: usdToNgnRate,
+      country: normalizedCountry,
+      service: normalizedService,
+      serviceType: normalizedType,
+      cheapestProvider,
+      providers: providerResults,
       services
     });
   } catch (error) {
-    console.error("SERVICE FETCH ERROR:", error.response?.data || error.message);
+    console.error("SERVICE FETCH ERROR:", error.message);
 
     return res.status(500).json({
-      message: "Failed to fetch services from provider"
+      success: false,
+      message: "Failed to fetch services from providers",
+      error: error.message
     });
   }
 };

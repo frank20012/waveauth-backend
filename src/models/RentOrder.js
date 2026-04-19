@@ -25,6 +25,7 @@ const rentOrderSchema = new mongoose.Schema(
     },
     provider: {
       type: String,
+      enum: ["smspool", "tiger", "pvapins", "5sim"],
       default: "smspool"
     },
     providerOrderId: {
@@ -43,6 +44,10 @@ const rentOrderSchema = new mongoose.Schema(
       type: Number,
       default: 0
     },
+    rawProviderResponse: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
     price: {
       type: Number,
       required: true,
@@ -50,7 +55,15 @@ const rentOrderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "active", "completed", "cancelled", "expired", "failed"],
+      enum: [
+        "pending",
+        "active",
+        "waiting_sms",
+        "completed",
+        "cancelled",
+        "expired",
+        "failed"
+      ],
       default: "pending"
     }
   },
