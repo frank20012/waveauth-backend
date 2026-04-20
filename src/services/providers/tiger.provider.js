@@ -4,32 +4,77 @@ const BASE_URL = "https://api.tiger-sms.com/stubs/handler_api.php";
 
 const TIGER_COUNTRY_MAP = {
   "UNITED STATES": "1",
-  USA: "1",
-  US: "1",
-  NIGERIA: "160",
-  NG: "160",
+  "USA": "1",
+  "US": "1",
+  "NIGERIA": "160",
+  "NG": "160",
   "UNITED KINGDOM": "16",
-  UK: "16",
-  CANADA: "36",
-  CA: "36"
+  "UK": "16",
+  "ENGLAND": "16",
+  "CANADA": "36",
+  "CA": "36",
+  "AUSTRALIA": "6",
+  "AU": "6",
+  "GERMANY": "43",
+  "DE": "43",
+  "FRANCE": "78",
+  "FR": "78",
+  "NETHERLANDS": "48",
+  "NL": "48",
+  "SWEDEN": "46",
+  "SE": "46",
+  "INDIA": "22",
+  "IN": "22",
+  "SPAIN": "56",
+  "ES": "56",
+  "ITALY": "86",
+  "IT": "86",
+  "POLAND": "15",
+  "PL": "15",
+  "PORTUGAL": "117",
+  "PT": "117",
+  "BELGIUM": "82",
+  "BE": "82",
+  "BRAZIL": "73",
+  "BR": "73",
+  "MEXICO": "54",
+  "MX": "54",
+  "RUSSIA": "0",
+  "RU": "0",
+  "UKRAINE": "1",
+  "UA": "1",
+  "UNITED ARAB EMIRATES": "165",
+  "UAE": "165",
+  "SOUTH AFRICA": "31",
+  "ZA": "31"
 };
 
 const TIGER_SERVICE_ALIASES = {
-  whatsapp: ["wa", "whatsapp"],
-  telegram: ["tg", "telegram"],
-  facebook: ["fb", "facebook"],
-  instagram: ["ig", "instagram"],
-  google: ["go", "google"],
-  gmail: ["go", "gmail", "google"],
-  tiktok: ["tk", "tiktok"],
-  discord: ["dc", "discord"],
-  amazon: ["am", "amazon"],
-  line: ["li", "line"]
+  whatsapp: ["wa"],
+  telegram: ["tg"],
+  facebook: ["fb"],
+  instagram: ["ig"],
+  google: ["go"],
+  gmail: ["go"],
+  tiktok: ["tk"],
+  discord: ["dc"],
+  amazon: ["am"],
+  line: ["li"]
 };
 
 const mapTigerCountry = (country) => {
   const normalized = String(country || "").trim().toUpperCase();
-  return TIGER_COUNTRY_MAP[normalized] || normalized;
+  return TIGER_COUNTRY_MAP[normalized] || null;
+};
+
+const ensureTigerCountrySupported = (country) => {
+  const tigerCountry = mapTigerCountry(country);
+
+  if (!tigerCountry) {
+    throw new Error(`Tiger unsupported country: ${country}`);
+  }
+
+  return tigerCountry;
 };
 
 const getTigerServiceCandidates = (service) => {
@@ -120,7 +165,7 @@ const extractTigerPriceResult = (data, countryCode, serviceCode) => {
 };
 
 const resolveTigerServiceForPricing = async (country, service) => {
-  const tigerCountry = mapTigerCountry(country);
+  const tigerCountry = ensureTigerCountrySupported(country);
   const candidates = getTigerServiceCandidates(service);
   const attempts = [];
 
@@ -165,18 +210,23 @@ const resolveTigerServiceForPricing = async (country, service) => {
 };
 
 const resolveTigerServiceForPurchase = async (country, service, activationType) => {
-  const tigerCountry = mapTigerCountry(country);
+  const tigerCountry = ensureTigerCountrySupported(country);
   const candidates = getTigerServiceCandidates(service);
   const attempts = [];
 
   for (const candidate of candidates) {
+    console.log("TIGER PURCHASE TRY:", {
+  country: tigerCountry,
+  service: candidate,
+  activationType
+});
     const data = await tigerRequest({
       action: "getNumber",
       country: tigerCountry,
       service: candidate,
       activationType
     });
-
+console.log("TIGER PURCHASE RESPONSE:", data);
     attempts.push({
       country: tigerCountry,
       service: candidate,

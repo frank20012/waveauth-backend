@@ -8,7 +8,7 @@ export const providers = {
   pvapins: pvapinsProvider
 };
 
-export const TEMP_PROVIDER_PRIORITY = ["smspool", "tiger", "pvapins"];
+export const TEMP_PROVIDER_PRIORITY = ["tiger", "smspool", "pvapins"];
 export const RENT_PROVIDER_PRIORITY = ["smspool", "pvapins", "tiger"];
 
 export const getProvider = (providerName) => {
