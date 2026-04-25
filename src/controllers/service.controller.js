@@ -54,14 +54,6 @@ export const getServices = async (req, res) => {
       name: normalizedService,
       country: normalizedCountry,
       type: normalizedType,
-      providerPrice: Number(item.providerPrice || 0),
-      providerCurrency: String(item.providerCurrency || "USD").toUpperCase(),
-      providerPriceDisplay:
-        Number(item.providerPrice || 0) > 0
-          ? `${Number(item.providerPrice).toFixed(2)} ${String(
-              item.providerCurrency || "USD"
-            ).toUpperCase()}`
-          : null,
       price: Boolean(item.hasValidPrice)
         ? Number(item.sellingPriceNgn || 0)
         : null,
@@ -70,7 +62,8 @@ export const getServices = async (req, res) => {
       count: Number(item.stock || 0),
       status: Number(item.stock || 0) > 0 ? "active" : "inactive",
       hasValidPrice: Boolean(item.hasValidPrice),
-      error: item.error || null
+      error: item.error || null,
+      stockMode: item.raw?.stockMode || null
     }));
 
     return res.status(200).json({
