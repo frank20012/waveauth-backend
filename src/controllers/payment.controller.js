@@ -3,17 +3,87 @@ import crypto from "crypto";
 import Wallet from "../models/wallet.js";
 import Transaction from "../models/transaction.js";
 
+const MIN_FUND_AMOUNT = 100;
+const MAX_FUND_AMOUNT = 1000000;
+
 const generateReference = () => {
   return `PSK-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+};
+
+const getPaystackHeaders = () => ({
+  Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+  "Content-Type": "application/json"
+});
+
+const isTerminalFailedStatus = (status = "") => {
+  const normalized = String(status).toLowerCase().trim();
+  return ["failed", "abandoned", "cancelled", "canceled", "reversed"].includes(
+    normalized
+  );
+};
+
+const saveFailedTransaction = async (
+  transaction,
+  providerStatus = "failed",
+  extra = {}
+) => {
+  transaction.status = "failed";
+  transaction.providerStatus = String(providerStatus || "failed");
+  transaction.meta = {
+    ...(transaction.meta || {}),
+    ...extra
+  };
+  await transaction.save();
+  return transaction;
+};
+
+const completeWalletFunding = async (
+  transaction,
+  providerStatus = "success",
+  extra = {}
+) => {
+  if (transaction.status === "completed") {
+    return transaction;
+  }
+
+  const wallet = await Wallet.findById(transaction.wallet);
+
+  if (!wallet) {
+    throw new Error("Wallet not found");
+  }
+
+  wallet.balance += Number(transaction.amount || 0);
+  await wallet.save();
+
+  transaction.status = "completed";
+  transaction.providerStatus = String(providerStatus || "success");
+  transaction.meta = {
+    ...(transaction.meta || {}),
+    ...extra
+  };
+  await transaction.save();
+
+  return transaction;
 };
 
 export const initializePaystackPayment = async (req, res, next) => {
   try {
     const { amount } = req.body;
+    const parsedAmount = Number(amount);
 
-    if (!amount || Number(amount) <= 0) {
+    if (!parsedAmount || Number.isNaN(parsedAmount)) {
       res.status(400);
       throw new Error("Valid amount is required");
+    }
+
+    if (parsedAmount < MIN_FUND_AMOUNT) {
+      res.status(400);
+      throw new Error(`Minimum funding amount is ₦${MIN_FUND_AMOUNT}`);
+    }
+
+    if (parsedAmount > MAX_FUND_AMOUNT) {
+      res.status(400);
+      throw new Error(`Maximum funding amount is ₦${MAX_FUND_AMOUNT.toLocaleString()}`);
     }
 
     const wallet = await Wallet.findOne({ user: req.user._id });
@@ -23,18 +93,7 @@ export const initializePaystackPayment = async (req, res, next) => {
       throw new Error("Wallet not found");
     }
 
-    const parsedAmount = Number(amount);
     const reference = generateReference();
-
-    await Transaction.create({
-      user: req.user._id,
-      wallet: wallet._id,
-      type: "credit",
-      amount: parsedAmount,
-      description: "Wallet funding via Paystack",
-      status: "pending",
-      reference
-    });
 
     const response = await axios.post(
       "https://api.paystack.co/transaction/initialize",
@@ -50,14 +109,32 @@ export const initializePaystackPayment = async (req, res, next) => {
         }
       },
       {
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-          "Content-Type": "application/json"
-        }
+        headers: getPaystackHeaders()
       }
     );
 
     const paystackData = response.data?.data;
+
+    if (!paystackData?.authorization_url) {
+      res.status(400);
+      throw new Error("Paystack did not return an authorization URL");
+    }
+
+    await Transaction.create({
+      user: req.user._id,
+      wallet: wallet._id,
+      type: "credit",
+      amount: parsedAmount,
+      description: "Fund Wallet",
+      status: "pending",
+      reference,
+      paymentProvider: "paystack",
+      providerStatus: "pending_payment",
+      meta: {
+        fundingType: "wallet",
+        accessCode: paystackData.access_code || ""
+      }
+    });
 
     res.status(200).json({
       message: "Payment initialized successfully",
@@ -83,7 +160,7 @@ export const verifyPaystackPayment = async (req, res, next) => {
 
     if (!transaction) {
       res.status(404);
-      throw new Error("Pending transaction not found");
+      throw new Error("Transaction not found");
     }
 
     if (transaction.status === "completed") {
@@ -112,33 +189,54 @@ export const verifyPaystackPayment = async (req, res, next) => {
       throw new Error("Invalid Paystack verification response");
     }
 
-    if (paystackData.status !== "success") {
-      transaction.status = "failed";
-      await transaction.save();
+    const providerStatus = String(paystackData.status || "").toLowerCase();
+
+    if (providerStatus === "success") {
+      const completedTransaction = await completeWalletFunding(
+        transaction,
+        providerStatus,
+        {
+          paidAt: paystackData.paid_at || null,
+          channel: paystackData.channel || "",
+          gatewayResponse: paystackData.gateway_response || ""
+        }
+      );
+
+      const wallet = await Wallet.findById(completedTransaction.wallet);
+
+      return res.status(200).json({
+        message: "Payment verified and wallet funded successfully",
+        wallet,
+        transaction: completedTransaction
+      });
+    }
+
+    if (isTerminalFailedStatus(providerStatus) || providerStatus !== "success") {
+      await saveFailedTransaction(transaction, providerStatus, {
+        gatewayResponse: paystackData.gateway_response || "",
+        paidAt: paystackData.paid_at || null
+      });
 
       res.status(400);
       throw new Error("Payment was not successful");
     }
+  } catch (error) {
+    if (error.response?.status === 400 || error.response?.status === 404) {
+      const { reference } = req.params;
 
-    const wallet = await Wallet.findById(transaction.wallet);
+      const transaction = await Transaction.findOne({ reference });
 
-    if (!wallet) {
-      res.status(404);
-      throw new Error("Wallet not found");
+      if (transaction && transaction.status === "pending") {
+        await saveFailedTransaction(transaction, "invalid_reference", {
+          reconcileError: error.message || "Paystack verify failed",
+          paystackStatusCode: error.response?.status || null
+        });
+      }
+
+      res.status(400);
+      return next(new Error("Invalid Paystack transaction reference"));
     }
 
-    wallet.balance += transaction.amount;
-    await wallet.save();
-
-    transaction.status = "completed";
-    await transaction.save();
-
-    res.status(200).json({
-      message: "Payment verified and wallet funded successfully",
-      wallet,
-      transaction
-    });
-  } catch (error) {
     next(error);
   }
 };
@@ -162,32 +260,35 @@ export const handlePaystackWebhook = async (req, res, next) => {
     }
 
     const event = req.body;
+    const eventData = event?.data || {};
+    const reference = eventData.reference;
+
+    if (!reference) {
+      return res.sendStatus(200);
+    }
+
+    const transaction = await Transaction.findOne({ reference });
+
+    if (!transaction) {
+      return res.sendStatus(200);
+    }
 
     if (event.event === "charge.success") {
-      const data = event.data;
-      const reference = data.reference;
+      await completeWalletFunding(transaction, "success", {
+        paidAt: eventData.paid_at || null,
+        channel: eventData.channel || "",
+        gatewayResponse: eventData.gateway_response || ""
+      });
 
-      const transaction = await Transaction.findOne({ reference });
+      return res.sendStatus(200);
+    }
 
-      if (!transaction) {
-        return res.sendStatus(200);
-      }
+    if (event.event === "charge.failed") {
+      await saveFailedTransaction(transaction, "failed", {
+        gatewayResponse: eventData.gateway_response || ""
+      });
 
-      if (transaction.status === "completed") {
-        return res.sendStatus(200);
-      }
-
-      const wallet = await Wallet.findById(transaction.wallet);
-
-      if (!wallet) {
-        return res.sendStatus(200);
-      }
-
-      wallet.balance += transaction.amount;
-      await wallet.save();
-
-      transaction.status = "completed";
-      await transaction.save();
+      return res.sendStatus(200);
     }
 
     return res.sendStatus(200);

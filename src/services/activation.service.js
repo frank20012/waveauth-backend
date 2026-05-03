@@ -28,6 +28,87 @@ const buildSellingPrice = async (providerPrice, providerCurrency = "USD") => {
   );
 };
 
+const normalizeProviderPrice = (priceInfo = {}, purchase = {}) => {
+  return (
+    Number(purchase?.raw?.cost) ||
+    Number(purchase?.raw?.price) ||
+    Number(purchase?.raw?.amount) ||
+    Number(priceInfo?.providerPrice) ||
+    Number(priceInfo?.providerPriceUsd) ||
+    Number(priceInfo?.raw?.cost) ||
+    Number(priceInfo?.raw?.price) ||
+    0
+  );
+};
+
+const normalizeProviderCurrency = (priceInfo = {}, purchase = {}) => {
+  return String(
+    purchase?.raw?.currency ||
+      priceInfo?.providerCurrency ||
+      priceInfo?.raw?.currency ||
+      "USD"
+  ).toUpperCase();
+};
+
+export const getTemporaryActivationQuote = async ({
+  country,
+  service,
+  operator
+}) => {
+  const providerNames = getProviderPriority("temporary");
+  const errors = [];
+
+  for (const providerName of providerNames) {
+    const provider = getProvider(providerName);
+
+    if (!provider) continue;
+
+    try {
+      const priceInfo = await provider.getPrice({
+        country,
+        service,
+        type: "temporary",
+        operator
+      });
+
+      if (Number(priceInfo?.stock || 0) <= 0) {
+        errors.push(`${providerName}: no stock`);
+        continue;
+      }
+
+      const providerPrice = normalizeProviderPrice(priceInfo);
+      const providerCurrency = normalizeProviderCurrency(priceInfo);
+
+      const sellingPrice = await buildSellingPrice(
+        providerPrice,
+        providerCurrency
+      );
+
+      if (!sellingPrice || sellingPrice <= 0) {
+        errors.push(`${providerName}: invalid price`);
+        continue;
+      }
+
+      return {
+        available: true,
+        provider: providerName,
+        providerPrice: Number(providerPrice || 0),
+        providerCurrency,
+        sellingPrice: Number(sellingPrice || 0),
+        stock: Number(priceInfo?.stock || 0),
+        raw: priceInfo?.raw || {}
+      };
+    } catch (error) {
+      errors.push(`${providerName}: ${error.message}`);
+    }
+  }
+
+  return {
+    available: false,
+    message: `No provider could supply this temporary number. ${errors.join(" | ")}`
+  };
+};
+
 export const buyTemporaryActivation = async ({
   userId,
   country,
@@ -46,7 +127,8 @@ export const buyTemporaryActivation = async ({
       const priceInfo = await provider.getPrice({
         country,
         service,
-        type: "temporary"
+        type: "temporary",
+        operator
       });
 
       if (Number(priceInfo?.stock || 0) <= 0) {
@@ -60,21 +142,21 @@ export const buyTemporaryActivation = async ({
         operator
       });
 
-      const liveProviderCost =
-        Number(purchase?.raw?.cost) ||
-        Number(purchase?.raw?.price) ||
-        Number(priceInfo?.providerPrice || 0);
+      if (!purchase?.phoneNumber || !purchase?.providerOrderId) {
+        throw new Error("Provider did not return number or order ID");
+      }
 
-      const liveProviderCurrency = String(
-        purchase?.raw?.currency ||
-          priceInfo?.providerCurrency ||
-          "USD"
-      ).toUpperCase();
+      const liveProviderCost = normalizeProviderPrice(priceInfo, purchase);
+      const liveProviderCurrency = normalizeProviderCurrency(priceInfo, purchase);
 
       const finalSellingPrice = await buildSellingPrice(
         liveProviderCost,
         liveProviderCurrency
       );
+
+      if (!finalSellingPrice || finalSellingPrice <= 0) {
+        throw new Error("Invalid final selling price");
+      }
 
       const orderData = {
         user: userId,
@@ -88,7 +170,11 @@ export const buyTemporaryActivation = async ({
         providerOperator: purchase?.raw?.operator || operator || "any",
         providerCost: Number(liveProviderCost || 0),
         rawProviderResponse: purchase.raw || {},
-        status: "pending"
+        status: "pending",
+        walletDebited: false,
+        chargedAmount: 0,
+        refundProcessed: false,
+        refundedAmount: 0
       };
 
       const order = await OtpOrder.create(orderData);
@@ -124,14 +210,14 @@ export const checkTemporaryActivationOtp = async (orderId) => {
     operator: order.providerOperator
   });
 
-  order.otpCode = result.otpCode || order.otpCode || "";
-  order.rawProviderResponse = result.raw || order.rawProviderResponse || {};
+  order.otpCode = result?.otpCode || order.otpCode || "";
+  order.rawProviderResponse = result?.raw || order.rawProviderResponse || {};
 
-  if (result.status === "otp_received") {
+  if (result?.status === "otp_received") {
     order.status = "completed";
-  } else if (result.status === "cancelled") {
+  } else if (result?.status === "cancelled") {
     order.status = "cancelled";
-  } else if (result.status) {
+  } else if (result?.status) {
     order.status = "active";
   }
 
@@ -160,9 +246,9 @@ export const cancelTemporaryActivation = async (orderId) => {
     operator: order.providerOperator
   });
 
-  if (result.success) {
+  if (result?.success) {
     order.status = "cancelled";
-    order.rawProviderResponse = result.raw || order.rawProviderResponse || {};
+    order.rawProviderResponse = result?.raw || order.rawProviderResponse || {};
     await order.save();
   }
 

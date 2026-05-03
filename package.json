@@ -1,7 +1,7 @@
 {
-  "name": "waveauth-backend",
+  "name": "DESKOTP-backend",
   "version": "1.0.0",
-  "description": "WaveAuth backend API built with Express and MongoDB",
+  "description": "DESKOTP backend API built with Express and MongoDB",
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",

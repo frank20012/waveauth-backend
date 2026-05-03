@@ -30,7 +30,7 @@ const otpOrderSchema = new mongoose.Schema(
     },
     provider: {
       type: String,
-      enum: ["smspool", "tiger", "pvapins", "5sim"],
+      enum: ["smspool", "juicysms", "tiger", "pvapins", "5sim"],
       default: "smspool"
     },
     providerOrderId: {
@@ -51,8 +51,32 @@ const otpOrderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "active", "waiting_sms", "completed", "cancelled", "expired"],
+      enum: [
+        "pending",
+        "active",
+        "waiting_sms",
+        "completed",
+        "cancelled",
+        "expired",
+        "failed"
+      ],
       default: "pending"
+    },
+    walletDebited: {
+      type: Boolean,
+      default: false
+    },
+    chargedAmount: {
+      type: Number,
+      default: 0
+    },
+    refundProcessed: {
+      type: Boolean,
+      default: false
+    },
+    refundedAmount: {
+      type: Number,
+      default: 0
     }
   },
   {

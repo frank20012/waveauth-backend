@@ -144,9 +144,9 @@ export const forgotPassword = async (req, res, next) => {
 
     const html = `
       <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827;">
-        <h2>Reset your WaveAuth password</h2>
+        <h2>Reset your DESKOTP password</h2>
         <p>Hello ${user.firstName || "User"},</p>
-        <p>You requested a password reset for your WaveAuth account.</p>
+        <p>You requested a password reset for your DESKOTP account.</p>
         <p>Click the button below to reset your password:</p>
         <p>
           <a
@@ -166,13 +166,13 @@ export const forgotPassword = async (req, res, next) => {
         </p>
         <p>This link will expire in 30 minutes.</p>
         <p>If you did not request this, you can ignore this email.</p>
-        <p>WaveAuth</p>
+        <p>DESKOTP</p>
       </div>
     `;
 
     await sendEmail({
       to: user.email,
-      subject: "Reset your WaveAuth password",
+      subject: "Reset your DESKOTP password",
       html
     });
 

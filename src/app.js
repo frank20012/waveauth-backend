@@ -30,10 +30,12 @@ app.use(
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+// Ensure 'public' contains your CSS files
+app.use(express.static('public')); 
 
 app.get("/", (req, res) => {
   res.status(200).json({
-    message: "WaveAuth backend is running"
+    message: "DESKOTP backend is running"
   });
 });
 

@@ -29,12 +29,24 @@ const transactionSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: ["pending", "completed", "failed"],
-      default: "completed"
+      default: "pending"
     },
     reference: {
       type: String,
       required: true,
       unique: true
+    },
+    paymentProvider: {
+      type: String,
+      default: ""
+    },
+    providerStatus: {
+      type: String,
+      default: ""
+    },
+    meta: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
     }
   },
   {
