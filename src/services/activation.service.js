@@ -158,24 +158,24 @@ export const buyTemporaryActivation = async ({
         throw new Error("Invalid final selling price");
       }
 
-      const orderData = {
-        user: userId,
-        serviceName: service,
-        country,
-        assignedNumber: String(purchase.phoneNumber || ""),
-        otpCode: "",
-        price: Number(finalSellingPrice || 0),
-        provider: providerName,
-        providerOrderId: String(purchase.providerOrderId || ""),
-        providerOperator: purchase?.raw?.operator || operator || "any",
-        providerCost: Number(liveProviderCost || 0),
-        rawProviderResponse: purchase.raw || {},
-        status: "pending",
-        walletDebited: false,
-        chargedAmount: 0,
-        refundProcessed: false,
-        refundedAmount: 0
-      };
+     const orderData = {
+  user: userId,
+  serviceName: service,
+  country,
+  assignedNumber: String(purchase.phoneNumber || ""),
+  otpCode: "",
+  price: Number(finalSellingPrice || 0),
+  provider: providerName,
+  providerOrderId: String(purchase.providerOrderId || ""),
+  providerOperator: purchase?.raw?.operator || operator || "any",
+  providerCost: Number(liveProviderCost || 0),
+  rawProviderResponse: purchase.raw || {},
+  status: "active",
+  walletDebited: false,
+  chargedAmount: 0,
+  refundProcessed: false,
+  refundedAmount: 0
+};
 
       const order = await OtpOrder.create(orderData);
       return order;

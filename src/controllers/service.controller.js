@@ -5,29 +5,23 @@ export const getServices = async (req, res) => {
     const { country, service, type } = req.query;
 
     if (!country) {
-      return res.status(200).json({
-        success: true,
-        type: "countries",
-        message:
-          "Country list is no longer coming from FiveSim. Use the merged catalog endpoint instead.",
-        data: []
+      return res.status(400).json({
+        success: false,
+        message: "country is required. Use /api/catalog/countries to load countries."
       });
     }
 
-    const normalizedCountry = String(country).trim().toUpperCase();
+    const normalizedCountry = String(country).trim();
 
     if (!service) {
-      return res.status(200).json({
-        success: true,
-        type: "services",
-        country: normalizedCountry,
-        message:
-          "Service name is required to compare provider pricing across SMSPool, Tiger, and PVAPins.",
-        services: []
+      return res.status(400).json({
+        success: false,
+        message: "service is required. Use /api/catalog/services?country=COUNTRY to load services."
       });
     }
 
     const normalizedService = String(service).trim().toLowerCase();
+
     const normalizedType =
       String(type || "temporary").trim().toLowerCase() === "rental"
         ? "rental"

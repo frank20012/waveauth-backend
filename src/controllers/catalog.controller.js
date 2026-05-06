@@ -1,14 +1,15 @@
 import {
-  getMergedCountries,
-  getMergedServicesByCountry
-} from "../services/mergedCatalog.service.js";
+  getUnifiedCountries,
+  getUnifiedServicesByCountry
+} from "../services/catalog.service.js";
 
 export const getCatalogCountries = async (req, res) => {
   try {
-    const countries = await getMergedCountries();
+    const countries = await getUnifiedCountries();
 
     return res.status(200).json({
       success: true,
+      count: countries.length,
       countries
     });
   } catch (error) {
@@ -16,7 +17,7 @@ export const getCatalogCountries = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch merged countries",
+      message: "Failed to load country catalog",
       error: error.message
     });
   }
@@ -29,15 +30,16 @@ export const getCatalogServices = async (req, res) => {
     if (!country) {
       return res.status(400).json({
         success: false,
-        message: "Country is required"
+        message: "country is required"
       });
     }
 
-    const services = await getMergedServicesByCountry({ country });
+    const services = await getUnifiedServicesByCountry(country);
 
     return res.status(200).json({
       success: true,
-      country: String(country).trim().toUpperCase(),
+      country,
+      count: services.length,
       services
     });
   } catch (error) {
@@ -45,7 +47,7 @@ export const getCatalogServices = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch merged services",
+      message: "Failed to load service catalog",
       error: error.message
     });
   }
