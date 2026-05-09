@@ -1,13 +1,11 @@
-import { tigerProvider } from "./providers/tiger.provider.js";
 import { smsPoolProvider } from "./providers/smspool.provider.js";
 import { pvapinsProvider } from "./providers/pvapins.provider.js";
 import { juicySmsProvider } from "./providers/juicysms.provider.js";
 
 export const providers = {
+  pvapins: pvapinsProvider,
   juicysms: juicySmsProvider,
   smspool: smsPoolProvider,
-  pvapins: pvapinsProvider,
-  tiger: tigerProvider
 };
 
 export const TEMP_PROVIDER_PRIORITY = ["smspool", "juicysms", "pvapins", "tiger"];

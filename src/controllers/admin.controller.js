@@ -4,6 +4,84 @@ import OtpOrder from "../models/OtpOrder.js";
 import Transaction from "../models/transaction.js";
 import Ticket from "../models/Ticket.js";
 
+const toMoneyNumber = (value) => Number(value || 0);
+
+const getUserDisplayName = (user) => {
+  if (!user) return "-";
+
+  const firstName = user.firstName || "";
+  const lastName = user.lastName || "";
+  const fullName = `${firstName} ${lastName}`.trim();
+
+  return fullName || user.email || "-";
+};
+export const getAdminServices = async (req, res, next) => {
+  try {
+    const services = await Service.find().sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      message: "Admin services fetched successfully",
+      count: services.length,
+      services
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const createAdminService = async (req, res, next) => {
+  try {
+    const {
+      name,
+      serviceCode,
+      country,
+      price,
+      category,
+      deliveryType,
+      status,
+      description
+    } = req.body;
+
+    if (!name || !serviceCode || !country || Number(price) <= 0) {
+      return res.status(400).json({
+        message: "Name, service code, country, and valid price are required"
+      });
+    }
+
+    const service = await Service.create({
+      name: String(name).trim(),
+      serviceCode: String(serviceCode).trim().toLowerCase(),
+      country: String(country).trim(),
+      price: Number(price),
+      category: category || "otp",
+      deliveryType: deliveryType || "sms",
+      status: status || "active",
+      description: description || ""
+    });
+
+    return res.status(201).json({
+      message: "Service created successfully",
+      service
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+const buildOrderResponse = (order) => {
+  const plainOrder = order.toObject ? order.toObject() : order;
+
+  return {
+    ...plainOrder,
+    serviceName: plainOrder.serviceName || plainOrder.service?.name || "Service",
+    assignedNumber:
+      plainOrder.assignedNumber ||
+      plainOrder.numberInventory?.number ||
+      "",
+    price: toMoneyNumber(plainOrder.price || plainOrder.chargedAmount || 0),
+    userDisplayName: getUserDisplayName(plainOrder.user)
+  };
+};
+
 export const getAdminOverview = async (req, res, next) => {
   try {
     const [
@@ -24,8 +102,6 @@ export const getAdminOverview = async (req, res, next) => {
       User.find().select("-password").sort({ createdAt: -1 }).limit(5),
       OtpOrder.find()
         .populate("user", "firstName lastName email")
-        .populate("service")
-        .populate("numberInventory")
         .sort({ createdAt: -1 })
         .limit(5),
       Ticket.find()
@@ -34,7 +110,7 @@ export const getAdminOverview = async (req, res, next) => {
         .limit(5)
     ]);
 
-    res.status(200).json({
+    return res.status(200).json({
       message: "Admin overview fetched successfully",
       stats: {
         totalUsers,
@@ -44,8 +120,83 @@ export const getAdminOverview = async (req, res, next) => {
         totalTickets
       },
       recentUsers,
-      recentOrders,
+      recentOrders: recentOrders.map(buildOrderResponse),
       recentTickets
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getAdminOrders = async (req, res, next) => {
+  try {
+    const orders = await OtpOrder.find()
+      .populate("user", "firstName lastName email")
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      message: "Admin orders fetched successfully",
+      count: orders.length,
+      orders: orders.map(buildOrderResponse)
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateAdminOrder = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { status, otpCode } = req.body;
+
+    const allowedStatuses = [
+      "pending",
+      "active",
+      "waiting_sms",
+      "completed",
+      "cancelled",
+      "expired",
+      "failed"
+    ];
+
+    const order = await OtpOrder.findById(id);
+
+    if (!order) {
+      return res.status(404).json({
+        message: "Order not found"
+      });
+    }
+
+    if (status) {
+      const normalizedStatus = String(status).trim().toLowerCase();
+
+      if (!allowedStatuses.includes(normalizedStatus)) {
+        return res.status(400).json({
+          message: "Invalid order status"
+        });
+      }
+
+      order.status = normalizedStatus;
+    }
+
+    if (typeof otpCode !== "undefined") {
+      order.otpCode = String(otpCode || "").trim();
+
+      if (order.otpCode && order.status !== "cancelled" && order.status !== "expired") {
+        order.status = "completed";
+      }
+    }
+
+    await order.save();
+
+    const updatedOrder = await OtpOrder.findById(order._id).populate(
+      "user",
+      "firstName lastName email"
+    );
+
+    return res.status(200).json({
+      message: "Order updated successfully",
+      order: buildOrderResponse(updatedOrder)
     });
   } catch (error) {
     next(error);
@@ -56,32 +207,33 @@ export const getAdminReports = async (req, res, next) => {
   try {
     const [users, orders, transactions, services, tickets] = await Promise.all([
       User.find().select("-password"),
-      OtpOrder.find().populate("service"),
+      OtpOrder.find(),
       Transaction.find(),
       Service.find(),
       Ticket.find()
     ]);
 
     const totalRevenue = transactions
-      .filter((t) => t.type === "debit" && t.status === "completed")
-      .reduce((sum, t) => sum + Number(t.amount), 0);
+      .filter((transaction) => transaction.type === "debit" && transaction.status === "completed")
+      .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
 
     const totalCredits = transactions
-      .filter((t) => t.type === "credit" && t.status === "completed")
-      .reduce((sum, t) => sum + Number(t.amount), 0);
+      .filter((transaction) => transaction.type === "credit" && transaction.status === "completed")
+      .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
 
     const totalRefunds = transactions
-      .filter((t) => t.type === "refund" && t.status === "completed")
-      .reduce((sum, t) => sum + Number(t.amount), 0);
+      .filter((transaction) => transaction.type === "refund" && transaction.status === "completed")
+      .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
 
-    const activeUsers = users.filter((u) => u.isActive).length;
-    const openTickets = tickets.filter((t) => t.status === "open").length;
-    const reviewTickets = tickets.filter((t) => t.status === "review").length;
-    const resolvedTickets = tickets.filter((t) => t.status === "resolved").length;
+    const activeUsers = users.filter((user) => user.isActive !== false).length;
+    const openTickets = tickets.filter((ticket) => ticket.status === "open").length;
+    const reviewTickets = tickets.filter((ticket) => ticket.status === "review").length;
+    const resolvedTickets = tickets.filter((ticket) => ticket.status === "resolved").length;
 
     const serviceMap = {};
+
     orders.forEach((order) => {
-      const serviceName = order.service?.name || "Unknown Service";
+      const serviceName = order.serviceName || "Unknown Service";
       serviceMap[serviceName] = (serviceMap[serviceName] || 0) + 1;
     });
 
@@ -91,12 +243,17 @@ export const getAdminReports = async (req, res, next) => {
       .slice(0, 5);
 
     const recentMonths = {};
+
     transactions.forEach((transaction) => {
       const date = new Date(transaction.createdAt);
       const key = `${date.getFullYear()}-${date.getMonth() + 1}`;
+
       if (!recentMonths[key]) {
         recentMonths[key] = {
-          label: date.toLocaleString("en-US", { month: "long", year: "numeric" }),
+          label: date.toLocaleString("en-US", {
+            month: "long",
+            year: "numeric"
+          }),
           revenue: 0,
           credits: 0,
           refunds: 0,
@@ -107,21 +264,21 @@ export const getAdminReports = async (req, res, next) => {
       recentMonths[key].transactions += 1;
 
       if (transaction.type === "debit" && transaction.status === "completed") {
-        recentMonths[key].revenue += Number(transaction.amount);
+        recentMonths[key].revenue += Number(transaction.amount || 0);
       }
 
       if (transaction.type === "credit" && transaction.status === "completed") {
-        recentMonths[key].credits += Number(transaction.amount);
+        recentMonths[key].credits += Number(transaction.amount || 0);
       }
 
       if (transaction.type === "refund" && transaction.status === "completed") {
-        recentMonths[key].refunds += Number(transaction.amount);
+        recentMonths[key].refunds += Number(transaction.amount || 0);
       }
     });
 
     const monthlyBreakdown = Object.values(recentMonths).slice(-6);
 
-    res.status(200).json({
+    return res.status(200).json({
       message: "Admin reports fetched successfully",
       stats: {
         totalUsers: users.length,

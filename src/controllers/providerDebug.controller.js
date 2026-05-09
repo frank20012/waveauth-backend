@@ -1,10 +1,10 @@
 import { smsPoolProvider } from "../services/providers/smspool.provider.js";
-import { tigerProvider } from "../services/providers/tiger.provider.js";
 import { pvapinsProvider } from "../services/providers/pvapins.provider.js";
+import { juicySmsProvider } from "../services/providers/juicysms.provider.js";
 
 const providerMap = {
   smspool: smsPoolProvider,
-  tiger: tigerProvider,
+  juicysms: juicySmsProvider,
   pvapins: pvapinsProvider
 };
 

@@ -8,8 +8,7 @@ import orderRoutes from "./routes/otp.routes.js";
 import walletRoutes from "./routes/wallet.routes.js";
 import transactionRoutes from "./routes/transaction.routes.js";
 import ticketRoutes from "./routes/ticket.routes.js";
-import adminRoutes from "./routes/admin.routes.js";
-// import otpOrderRoutes from "./routes/otpOrder.routes.js";
+import adminRoutes from "./routes/admin.routes.js"
 import numberInventoryRoutes from "./routes/numberInventory.routes.js";
 import paymentRoutes from "./routes/payment.routes.js";
 import rentRoutes from "./routes/rent.routes.js";
@@ -47,7 +46,6 @@ app.use("/api/wallet", walletRoutes);
 app.use("/api/transactions", transactionRoutes);
 app.use("/api/tickets", ticketRoutes);
 app.use("/api/admin", adminRoutes);
-// app.use("/api/otp-orders", otpOrderRoutes);
 app.use("/api/numbers", numberInventoryRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/rent", rentRoutes);
