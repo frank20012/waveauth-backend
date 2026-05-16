@@ -37,7 +37,7 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 // Ensure 'public' contains your CSS files
-app.use(express.static('public')); 
+// app.use(express.static('public')); 
 
 app.get("/health", (req, res) => {
   res.status(200).json({
