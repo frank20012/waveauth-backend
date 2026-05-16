@@ -32,6 +32,13 @@ app.use(express.urlencoded({ extended: true }));
 // Ensure 'public' contains your CSS files
 app.use(express.static('public')); 
 
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "DESKOTP backend running"
+  });
+});
+
 app.get("/", (req, res) => {
   res.status(200).json({
     message: "DESKOTP backend is running"
