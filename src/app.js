@@ -22,8 +22,15 @@ const app = express();
 
 app.use(
   cors({
-    origin: true,
-    credentials: true
+    origin: [
+      "https://deskotp.com",
+      "https://www.deskotp.com",
+      "http://localhost:5000",
+      "http://127.0.0.1:5000"
+    ],
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"]
   })
 );
 
