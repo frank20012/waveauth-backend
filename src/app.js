@@ -1,5 +1,9 @@
 import express from "express";
 import cors from "cors";
+import compression from "compression";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import morgan from "morgan";
 
 import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
@@ -19,14 +23,24 @@ import notFound from "./middlewares/notfound.middleware.js";
 import errorHandler from "./middlewares/error.middleware.js";
 
 const app = express();
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 150,
+  message: {
+    success: false,
+    message: "Too many requests. Try again later."
+  }
+});
 
+
+app.use(limiter);
 app.use(
   cors({
     origin: [
       "https://deskotp.com",
       "https://www.deskotp.com",
-      "http://localhost:5000",
-      "http://127.0.0.1:5000"
+      "http://localhost:5501",
+      "http://127.0.0.1:5501"
     ],
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -34,10 +48,16 @@ app.use(
   })
 );
 
+// app.options("*", cors());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: false
+  })
+);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-// Ensure 'public' contains your CSS files
-// app.use(express.static('public')); 
+app.use(compression());
+app.use(morgan("dev"));
 
 app.get("/health", (req, res) => {
   res.status(200).json({

@@ -8,8 +8,8 @@ export const providers = {
   smspool: smsPoolProvider,
 };
 
-export const TEMP_PROVIDER_PRIORITY = ["smspool", "juicysms", "pvapins", "tiger"];
-export const RENT_PROVIDER_PRIORITY = ["smspool", "pvapins", "juicysms", "tiger"];
+export const TEMP_PROVIDER_PRIORITY = ["smspool", "pvapins", "juicysms"];
+export const RENT_PROVIDER_PRIORITY = ["smspool", "pvapins", "juicysms"];
 
 export const getProvider = (providerName) => {
   return providers[providerName] || null;
