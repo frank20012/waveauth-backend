@@ -6,7 +6,8 @@ import {
 } from "../../config/juicysmsCatalog.js";
 
 const JUICYSMS_API_KEY = process.env.JUICYSMS_API_KEY || "";
-const JUICYSMS_BASE_URL = process.env.JUICYSMS_BASE_URL || "https://juicysms.com";
+const JUICYSMS_BASE_URL =
+  process.env.JUICYSMS_BASE_URL || "https://juicysms.com";
 
 const createClient = () =>
   axios.create({
@@ -27,24 +28,53 @@ const normalizeResponseData = (data) => {
 };
 
 const parseOrderResponse = (payload) => {
+  console.log("========== JUICYSMS RAW ORDER RESPONSE ==========");
+  console.log(JSON.stringify(payload, null, 2));
+  console.log("=================================================");
+
   if (!payload) return null;
 
+  // OBJECT RESPONSE
   if (typeof payload === "object") {
     const phoneNumber =
       payload.number ||
       payload.phone ||
       payload.phonenumber ||
       payload.msisdn ||
+      payload.mobile ||
+      payload.phoneNumber ||
+      payload.NUMBER ||
+      payload.PHONE ||
       payload.data?.number ||
+      payload.data?.phone ||
+      payload.data?.phonenumber ||
+      payload.data?.mobile ||
+      payload.data?.phoneNumber ||
+      payload.result?.number ||
+      payload.result?.phone ||
+      payload.result?.mobile ||
       "";
 
     const providerOrderId =
       payload.orderId ||
       payload.order_id ||
       payload.id ||
+      payload.ID ||
+      payload.ORDER_ID ||
       payload.data?.orderId ||
+      payload.data?.order_id ||
       payload.data?.id ||
+      payload.result?.orderId ||
+      payload.result?.order_id ||
+      payload.result?.id ||
       "";
+
+    console.log("========== PARSED ORDER RESPONSE ==========");
+    console.log({
+      phoneNumber,
+      providerOrderId
+    });
+    console.log("===========================================");
 
     return {
       phoneNumber: String(phoneNumber || ""),
@@ -53,19 +83,37 @@ const parseOrderResponse = (payload) => {
     };
   }
 
+  // STRING RESPONSE
   if (typeof payload === "string") {
     const text = payload.trim();
 
-    const phoneMatch =
-      text.match(/(?:number|phone|msisdn)[=:]\s*([+\d]+)/i) ||
-      text.match(/\b(\+?\d{7,15})\b/);
+    console.log("========== STRING RESPONSE ==========");
+    console.log(text);
+    console.log("=====================================");
 
-    const orderMatch =
-      text.match(/(?:orderid|order_id|id)[=:]\s*([a-z0-9_-]+)/i);
+    const phoneMatch =
+  text.match(/(?:number|phone|msisdn|mobile)[=:_]\s*([+\d]+)/i) ||
+  text.match(/NUMBER[_=:]?([+\d]+)/i) ||
+  text.match(/\b(\+?\d{7,15})\b/);
+
+const orderMatch =
+  text.match(/(?:orderid|order_id|id)[=:_]\s*([a-z0-9_-]+)/i) ||
+  text.match(/ORDER_ID[_=:]?([a-z0-9_-]+)/i);
+
+    console.log("========== STRING PARSED ==========");
+    console.log({
+      phone: phoneMatch?.[1],
+      orderId: orderMatch?.[1]
+    });
+    console.log("===================================");
 
     return {
-      phoneNumber: phoneMatch?.[1] ? String(phoneMatch[1]) : "",
-      providerOrderId: orderMatch?.[1] ? String(orderMatch[1]) : "",
+      phoneNumber: phoneMatch?.[1]
+        ? String(phoneMatch[1])
+        : "",
+      providerOrderId: orderMatch?.[1]
+        ? String(orderMatch[1])
+        : "",
       raw: text
     };
   }
@@ -90,10 +138,14 @@ const parseSmsResponse = (payload) => {
       payload.otp ||
       payload.data?.code ||
       payload.data?.sms ||
+      payload.data?.otp ||
       "";
 
     const explicitStatus = String(
-      payload.status || payload.state || payload.data?.status || ""
+      payload.status ||
+        payload.state ||
+        payload.data?.status ||
+        ""
     ).toLowerCase();
 
     if (otpCode) {
@@ -158,7 +210,9 @@ const getMappedService = (service) => {
   const mapped = findJuicyService(service);
 
   if (!mapped) {
-    throw new Error(`JuicySMS service mapping not found for: ${service}`);
+    throw new Error(
+      `JuicySMS service mapping not found for: ${service}`
+    );
   }
 
   return mapped;
@@ -168,7 +222,9 @@ const getMappedCountry = (country) => {
   const mappedCountry = getJuicyCountryCode(country);
 
   if (!mappedCountry) {
-    throw new Error(`JuicySMS unsupported country: ${country}`);
+    throw new Error(
+      `JuicySMS unsupported country: ${country}`
+    );
   }
 
   return mappedCountry;
@@ -181,6 +237,7 @@ export const juicySmsProvider = {
     ensureJuicyCredentials();
 
     const client = createClient();
+
     const response = await client.get("/api/getbalance", {
       params: {
         key: JUICYSMS_API_KEY
@@ -192,9 +249,17 @@ export const juicySmsProvider = {
     let balance = 0;
 
     if (typeof data === "object") {
-      balance = Number(data.balance || data.amount || data.data?.balance || 0);
+      balance = Number(
+        data.balance ||
+          data.amount ||
+          data.data?.balance ||
+          0
+      );
     } else {
-      const match = String(data).match(/([0-9]+(?:\.[0-9]+)?)/);
+      const match = String(data).match(
+        /([0-9]+(?:\.[0-9]+)?)/
+      );
+
       balance = Number(match?.[1] || 0);
     }
 
@@ -234,8 +299,12 @@ export const juicySmsProvider = {
     const mappedService = getMappedService(service);
 
     return {
-      providerPrice: Number(mappedService.priceUsd || 0),
-      providerPriceUsd: Number(mappedService.priceUsd || 0),
+      providerPrice: Number(
+        mappedService.priceUsd || 0
+      ),
+      providerPriceUsd: Number(
+        mappedService.priceUsd || 0
+      ),
       providerCurrency: "USD",
       stock: 1,
       raw: {
@@ -255,6 +324,16 @@ export const juicySmsProvider = {
 
     const client = createClient();
 
+    console.log("========== BUY REQUEST ==========");
+    console.log({
+      provider: "juicysms",
+      country,
+      mappedCountry,
+      service,
+      serviceId: mappedService.id
+    });
+    console.log("=================================");
+
     const response = await client.get("/api/makeorder", {
       params: {
         key: JUICYSMS_API_KEY,
@@ -264,26 +343,59 @@ export const juicySmsProvider = {
     });
 
     const data = normalizeResponseData(response.data);
+
     const parsed = parseOrderResponse(data);
 
-    if (!parsed?.phoneNumber || !parsed?.providerOrderId) {
+    if (
+      !parsed?.phoneNumber ||
+      !parsed?.providerOrderId
+    ) {
+      console.log(
+        "========== FAILED TO PARSE ORDER =========="
+      );
+
+      console.log({
+        parsed
+      });
+
+      console.log(
+        "==========================================="
+      );
+
       throw new Error(
         typeof data === "string"
           ? `JuicySMS buy failed: ${data}`
-          : "JuicySMS buy failed"
+          : `JuicySMS buy failed: ${JSON.stringify(data)}`
       );
     }
+
+    console.log(
+      "========== JUICYSMS ORDER SUCCESS =========="
+    );
+
+    console.log({
+      phoneNumber: parsed.phoneNumber,
+      providerOrderId: parsed.providerOrderId
+    });
+
+    console.log(
+      "============================================"
+    );
 
     return {
       phoneNumber: parsed.phoneNumber,
       providerOrderId: parsed.providerOrderId,
       raw: {
-        ...((typeof parsed.raw === "object" && parsed.raw) || {}),
+        ...((typeof parsed.raw === "object" &&
+          parsed.raw) ||
+          {}),
         serviceId: mappedService.id,
         serviceName: mappedService.name,
         country: mappedCountry,
         currency: "USD",
-        price: Number(mappedService.priceUsd || 0)
+        price: Number(
+          mappedService.priceUsd || 0
+        )
       }
     };
   },
@@ -292,6 +404,7 @@ export const juicySmsProvider = {
     ensureJuicyCredentials();
 
     const client = createClient();
+
     const response = await client.get("/api/getsms", {
       params: {
         key: JUICYSMS_API_KEY,
@@ -300,6 +413,7 @@ export const juicySmsProvider = {
     });
 
     const data = normalizeResponseData(response.data);
+
     return parseSmsResponse(data);
   },
 
@@ -307,18 +421,25 @@ export const juicySmsProvider = {
     ensureJuicyCredentials();
 
     const client = createClient();
-    const response = await client.get("/api/cancelorder", {
-      params: {
-        key: JUICYSMS_API_KEY,
-        orderId: providerOrderId
+
+    const response = await client.get(
+      "/api/cancelorder",
+      {
+        params: {
+          key: JUICYSMS_API_KEY,
+          orderId: providerOrderId
+        }
       }
-    });
+    );
 
     const data = normalizeResponseData(response.data);
 
     const success =
-      (typeof data === "object" && (data.success === true || data.status === "cancelled")) ||
-      (typeof data === "string" && /cancel|success|ok/i.test(data));
+      (typeof data === "object" &&
+        (data.success === true ||
+          data.status === "cancelled")) ||
+      (typeof data === "string" &&
+        /cancel|success|ok/i.test(data));
 
     return {
       success: Boolean(success),
@@ -330,12 +451,16 @@ export const juicySmsProvider = {
     ensureJuicyCredentials();
 
     const client = createClient();
-    const response = await client.get("/api/skipnumber", {
-      params: {
-        key: JUICYSMS_API_KEY,
-        orderId: providerOrderId
+
+    const response = await client.get(
+      "/api/skipnumber",
+      {
+        params: {
+          key: JUICYSMS_API_KEY,
+          orderId: providerOrderId
+        }
       }
-    });
+    );
 
     return {
       success: true,
@@ -347,6 +472,7 @@ export const juicySmsProvider = {
     ensureJuicyCredentials();
 
     const client = createClient();
+
     const response = await client.get("/api/reuse", {
       params: {
         key: JUICYSMS_API_KEY,

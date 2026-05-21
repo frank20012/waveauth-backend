@@ -245,11 +245,18 @@ export const checkOtpOrderStatus = async (req, res) => {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    if (!order.providerOrderId) {
-      return res.status(400).json({
-        message: "Provider order ID missing"
-      });
-    }
+
+    // PVAPINS uses phone number as fallback providerOrderId
+if (!order.providerOrderId) {
+  if (order.provider === "pvapins") {
+    order.providerOrderId = order.assignedNumber;
+    await order.save();
+  } else {
+    return res.status(400).json({
+      message: "Provider order ID missing"
+    });
+  }
+}
 
     const updatedOrder = await checkTemporaryActivationOtp(order._id);
 

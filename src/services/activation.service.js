@@ -142,9 +142,23 @@ export const buyTemporaryActivation = async ({
         operator
       });
 
-      if (!purchase?.phoneNumber || !purchase?.providerOrderId) {
-        throw new Error("Provider did not return number or order ID");
-      }
+      // PVAPINS does not return providerOrderId.
+// It only returns the phone number itself.
+
+if (providerName === "pvapins") {
+  if (!purchase?.phoneNumber) {
+    throw new Error("PVAPINS did not return phone number");
+  }
+
+  // Use phone number as fallback ID
+  purchase.providerOrderId =
+    purchase.providerOrderId || purchase.phoneNumber;
+} else {
+  // Other providers still require both
+  if (!purchase?.phoneNumber || !purchase?.providerOrderId) {
+    throw new Error("Provider did not return number or order ID");
+  }
+}
 
       const liveProviderCost = normalizeProviderPrice(priceInfo, purchase);
       const liveProviderCurrency = normalizeProviderCurrency(priceInfo, purchase);
@@ -160,14 +174,16 @@ export const buyTemporaryActivation = async ({
 
      const orderData = {
   user: userId,
-  serviceName: service,
-  country,
+    // ORIGINAL RAW SERVICE
+  serviceName: String(service || "").trim().toLowerCase(),
+    // ORIGINAL RAW COUNTRY
+  country: String(country || "").trim().toLowerCase(),
   assignedNumber: String(purchase.phoneNumber || ""),
   otpCode: "",
   price: Number(finalSellingPrice || 0),
   provider: providerName,
   providerOrderId: String(purchase.providerOrderId || ""),
-  providerOperator: purchase?.raw?.operator || operator || "any",
+  providerOperator: operator || "",
   providerCost: Number(liveProviderCost || 0),
   rawProviderResponse: purchase.raw || {},
   status: "active",

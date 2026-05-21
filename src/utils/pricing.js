@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const FLAT_MARKUP_NAIRA = Number(process.env.FLAT_MARKUP_NAIRA || 1800);
+const FLAT_MARKUP_NAIRA = Number(process.env.FLAT_MARKUP_NAIRA || 1500);
 const PERCENTAGE_MARKUP = Number(process.env.PERCENTAGE_MARKUP || 0);
 
 const FALLBACK_RATES = {

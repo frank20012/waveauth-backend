@@ -2,12 +2,6 @@ import axios from "axios";
 
 const BASE_URL = "https://api.pvapins.com/user/api";
 
-let pvapinsCountryCache = {
-  data: [],
-  map: new Map(),
-  expiresAt: 0
-};
-
 const normalizeText = (value) =>
   String(value || "")
     .trim()
@@ -15,41 +9,22 @@ const normalizeText = (value) =>
     .replace(/\s+/g, "")
     .replace(/[^a-z0-9]/g, "");
 
-const normalizeDisplayText = (value) => String(value || "").trim();
+const pvapinsGet = async (endpoint, params = {}) => {
+  try {
+    const response = await axios.get(`${BASE_URL}/${endpoint}`, {
+      params,
+      timeout: 30000
+    });
 
-const buildCountryAliases = (country = {}) => {
-  const id = String(country.id || country.providerCountryId || "").trim();
-  const name = normalizeDisplayText(
-    country.full_name || country.name || country.country || country.label
-  );
-
-  const aliases = new Set();
-
-  if (id) aliases.add(normalizeText(id));
-  if (name) aliases.add(normalizeText(name));
-
-  const upperName = name.toUpperCase();
-
-  if (upperName === "USA" || upperName === "UNITED STATES") {
-    aliases.add(normalizeText("US"));
-    aliases.add(normalizeText("USA"));
-    aliases.add(normalizeText("United States"));
-    aliases.add(normalizeText("United States of America"));
+    return response.data;
+  } catch (error) {
+    throw new Error(
+      error.response?.data?.message ||
+        error.response?.data?.error ||
+        JSON.stringify(error.response?.data) ||
+        error.message
+    );
   }
-
-  if (upperName === "UK" || upperName === "UNITED KINGDOM") {
-    aliases.add(normalizeText("UK"));
-    aliases.add(normalizeText("GB"));
-    aliases.add(normalizeText("Great Britain"));
-    aliases.add(normalizeText("United Kingdom"));
-  }
-
-  if (upperName === "UAE" || upperName === "UNITED ARAB EMIRATES") {
-    aliases.add(normalizeText("UAE"));
-    aliases.add(normalizeText("United Arab Emirates"));
-  }
-
-  return [...aliases].filter(Boolean);
 };
 
 const parseArrayResponse = (data) => {
@@ -64,177 +39,92 @@ const parseArrayResponse = (data) => {
   return [];
 };
 
-const pvapinsGet = async (endpoint, params = {}, options = {}) => {
-  const apiKey = process.env.PVAPINS_API_KEY;
-  const requiresAuth = options.requiresAuth !== false;
+const mapCountry = async (country) => {
+  const data = await pvapinsGet("load_countries.php");
 
-  if (requiresAuth && !apiKey) {
-    throw new Error("PVAPINS_API_KEY is missing in your .env file");
-  }
+  const countries = parseArrayResponse(data);
 
-  try {
-    const response = await axios.get(`${BASE_URL}/${endpoint}`, {
-      params,
-      timeout: 20000
-    });
+  const normalizedWanted = normalizeText(country);
 
-    return response.data;
-  } catch (error) {
-    const providerMessage =
-      error.response?.data?.message ||
-      error.response?.data?.error ||
-      JSON.stringify(error.response?.data) ||
-      error.message;
+  const found = countries.find((item) => {
+    const values = [
+      item.id,
+      item.name,
+      item.full_name,
+      item.country
+    ];
 
-    throw new Error(`PVAPins ${endpoint} failed: ${providerMessage}`);
-  }
-};
-
-const loadPvapinsCountryCatalog = async () => {
-  const now = Date.now();
-
-  if (pvapinsCountryCache.data.length && pvapinsCountryCache.expiresAt > now) {
-    return pvapinsCountryCache;
-  }
-
-  const data = await pvapinsGet("load_countries.php", {}, { requiresAuth: false });
-  const rawCountries = parseArrayResponse(data);
-
-  const countries = rawCountries
-    .map((country) => {
-      const id = String(country?.id || "").trim();
-      const name = normalizeDisplayText(
-        country?.full_name || country?.name || country?.country
-      );
-
-      if (!id || !name) return null;
-
-      return {
-        provider: "pvapins",
-        id,
-        providerCountryId: id,
-        name,
-        label: name,
-        value: name,
-        raw: country
-      };
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  const map = new Map();
-
-  countries.forEach((country) => {
-    buildCountryAliases(country).forEach((alias) => {
-      map.set(alias, country.providerCountryId);
-    });
+    return values.some(
+      (value) => normalizeText(value) === normalizedWanted
+    );
   });
 
-  pvapinsCountryCache = {
-    data: countries,
-    map,
-    expiresAt: now + 1000 * 60 * 60 * 6
-  };
+  if (!found) {
+    throw new Error(`PVAPINS country not found: ${country}`);
+  }
 
-  return pvapinsCountryCache;
+  return String(found.id);
 };
 
-const mapPvapinsCountry = async (country) => {
-  const normalized = normalizeText(country);
+const resolveService = async (countryId, service) => {
+  const data = await pvapinsGet("load_apps.php", {
+    country_id: countryId
+  });
 
-  if (!normalized) {
-    throw new Error("PVAPins country is required");
-  }
+  const services = parseArrayResponse(data);
 
-  const catalog = await loadPvapinsCountryCatalog();
-  const mappedCountryId = catalog.map.get(normalized);
-
-  if (mappedCountryId) {
-    return mappedCountryId;
-  }
-
-  const directCountryId = String(country || "").trim();
-
-  if (/^\d+$/.test(directCountryId)) {
-    return directCountryId;
-  }
-
-  throw new Error(`PVAPins country not found in catalog: ${country}`);
-};
-
-const resolvePvapinsServiceId = async (country, service) => {
-  const mappedCountry = await mapPvapinsCountry(country);
-
-  const services = await pvapinsGet(
-    "load_apps.php",
-    {
-      country_id: mappedCountry
-    },
-    { requiresAuth: false }
-  );
-
-  const serviceCatalog = parseArrayResponse(services);
   const normalizedWanted = normalizeText(service);
 
-  if (!serviceCatalog.length) {
-    throw new Error(
-      `PVAPins service catalog is empty for country ${mappedCountry}`
+  let exactMatch = services.find((item) => {
+    const values = [
+      item.full_name,
+      item.name,
+      item.app,
+      item.service
+    ];
+
+    return values.some(
+      (value) => normalizeText(value) === normalizedWanted
     );
-  }
+  });
 
-  const scoredMatches = serviceCatalog
-    .filter((item) => {
-      const normalizedName = normalizeText(
-        item.full_name || item.name || item.app || item.service
+  if (!exactMatch) {
+    exactMatch = services.find((item) => {
+      const values = [
+        item.full_name,
+        item.name,
+        item.app,
+        item.service
+      ];
+
+      return values.some((value) =>
+        normalizeText(value).includes(normalizedWanted)
       );
-
-      return (
-        normalizedName === normalizedWanted ||
-        normalizedName.startsWith(normalizedWanted) ||
-        normalizedName.includes(normalizedWanted) ||
-        normalizedWanted.includes(normalizedName)
-      );
-    })
-    .map((item) => {
-      const normalizedName = normalizeText(
-        item.full_name || item.name || item.app || item.service
-      );
-
-      let score = 1;
-
-      if (normalizedName === normalizedWanted) score = 4;
-      else if (normalizedName.startsWith(normalizedWanted)) score = 3;
-      else if (normalizedWanted.includes(normalizedName)) score = 2;
-
-      return {
-        ...item,
-        matchScore: score,
-        deductValue: Number(item.deduct || item.price || item.cost || 0)
-      };
-    })
-    .sort((a, b) => {
-      if (b.matchScore !== a.matchScore) {
-        return b.matchScore - a.matchScore;
-      }
-
-      return a.deductValue - b.deductValue;
     });
+  }
 
-  if (!scoredMatches.length) {
+  if (!exactMatch) {
     throw new Error(
-      `PVAPins could not resolve service "${service}" for country ${mappedCountry}`
+      `PVAPINS service "${service}" not found for country ${countryId}`
     );
   }
 
-  const bestMatch = scoredMatches[0];
+  console.log("PVAPINS RESOLVED SERVICE:", {
+    requested: service,
+    resolvedId: exactMatch.id,
+    resolvedName:
+      exactMatch.full_name ||
+      exactMatch.name ||
+      exactMatch.app
+  });
 
   return {
-    countryId: mappedCountry,
-    appId: bestMatch.id,
-    appName: bestMatch.full_name || bestMatch.name || bestMatch.app,
-    appDeduct: Number(bestMatch.deduct || bestMatch.price || bestMatch.cost || 0),
-    catalog: serviceCatalog,
-    matches: scoredMatches
+    appId: String(exactMatch.id),
+    appName:
+      exactMatch.full_name ||
+      exactMatch.name ||
+      exactMatch.app ||
+      service
   };
 };
 
@@ -242,195 +132,352 @@ export const pvapinsProvider = {
   name: "pvapins",
 
   async getCountries() {
-    const catalog = await loadPvapinsCountryCatalog();
-    return catalog.data;
+    const data = await pvapinsGet("load_countries.php");
+
+    return parseArrayResponse(data);
   },
 
-  async getServices(country) {
-    const countryValue =
-      typeof country === "object" ? country.country || country.countryId : country;
+  async getServices({ country }) {
+    const countryId = await mapCountry(country);
 
-    const mappedCountry = await mapPvapinsCountry(countryValue);
+    const data = await pvapinsGet("load_apps.php", {
+      country_id: countryId
+    });
 
-    const data = await pvapinsGet(
-      "load_apps.php",
-      {
-        country_id: mappedCountry
-      },
-      { requiresAuth: false }
-    );
-
-    const services = parseArrayResponse(data);
-
-    return services
-      .map((service) => {
-        const id = String(service?.id || "").trim();
-        const name = normalizeDisplayText(
-          service?.full_name || service?.name || service?.app || service?.service
-        );
-
-        if (!id || !name) return null;
-
-        return {
-          provider: "pvapins",
-          id,
-          providerServiceId: id,
-          name,
-          displayName: name,
-          country: mappedCountry,
-          providerPrice: Number(service?.deduct || service?.price || service?.cost || 0),
-          providerCurrency: "USD",
-          stock: 1,
-          available: true,
-          raw: service
-        };
-      })
-      .filter(Boolean)
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return parseArrayResponse(data);
   },
 
   async getPrice({ country, service }) {
-    const resolved = await resolvePvapinsServiceId(country, service);
+  try {
+    const normalizedCountry = String(country || "")
+      .trim();
 
-    const data = await pvapinsGet("get_rates.php", {
-      customer: process.env.PVAPINS_API_KEY,
-      country: resolved.countryId,
-      app: resolved.appId
-    });
+    const normalizedService = String(service || "")
+      .trim()
+      .toLowerCase();
 
-    if (Array.isArray(data) && data.length === 0) {
+    const data = await pvapinsGet(
+      "get_rates.php",
+      {
+        customer: process.env.PVAPINS_API_KEY,
+        country: normalizedCountry
+      }
+    );
+
+    console.log("PVAPINS RATES RESPONSE:", data);
+
+    if (!Array.isArray(data)) {
       return {
         provider: "pvapins",
-        providerPrice: Number(resolved.appDeduct || 0),
+        providerPrice: 0,
         providerCurrency: "USD",
-        stock: 1,
+        stock: 0,
+        raw: data
+      };
+    }
+
+    const matchedService = data.find((item) => {
+      const appName = String(item.app || "")
+        .trim()
+        .toLowerCase();
+
+      return (
+        appName === normalizedService ||
+        appName.includes(normalizedService)
+      );
+    });
+
+    // SERVICE NOT FOUND
+    if (!matchedService) {
+      return {
+        provider: "pvapins",
+        providerPrice: 0,
+        providerCurrency: "USD",
+        stock: 0,
         raw: {
-          source: "load_apps fallback",
-          countryId: resolved.countryId,
-          appId: resolved.appId,
-          appName: resolved.appName,
-          deduct: resolved.appDeduct,
-          ratesResponse: data,
-          stockMode: "estimated_from_catalog"
+          message: "Service not found"
         }
       };
     }
 
+    const providerPrice = Number(
+      matchedService.rate || 0
+    );
+
+    // PVAPINS API DOES NOT PROVIDE STOCK
+    // so assume available only if rate exists
+    const stock = providerPrice > 0 ? 1 : 0;
+
     return {
       provider: "pvapins",
-      providerPrice: Number(
-        data?.price ||
-          data?.rate ||
-          data?.cost ||
-          data?.deduct ||
-          resolved.appDeduct ||
-          0
-      ),
+      providerPrice,
       providerCurrency: "USD",
-      stock: Number(data?.stock || data?.count || data?.available || 0),
+      stock,
+      raw: matchedService
+    };
+  } catch (error) {
+    console.log(
+      "PVAPINS GET PRICE ERROR:",
+      error.message
+    );
+
+    return {
+      provider: "pvapins",
+      providerPrice: 0,
+      providerCurrency: "USD",
+      stock: 0,
       raw: {
-        ...((typeof data === "object" && data) || {}),
-        countryId: resolved.countryId,
-        appId: resolved.appId,
-        appName: resolved.appName
+        error: error.message
       }
     };
-  },
+  }
+},
 
   async buyTemporaryNumber({ country, service, operator }) {
-    const resolved = await resolvePvapinsServiceId(country, service);
+    try {
+      const normalizedCountry = String(country || "")
+        .trim()
+        .toLowerCase();
 
-    const data = await pvapinsGet("get_number.php", {
-      customer: process.env.PVAPINS_API_KEY,
-      country: resolved.countryId,
-      app: resolved.appId,
-      ...(operator ? { operator } : {})
-    });
+      const normalizedService = String(service || "")
+        .trim()
+        .toLowerCase();
 
-    const providerOrderId = data?.id || data?.order_id || data?.number;
-    const phoneNumber = data?.number;
-
-    if (!providerOrderId || !phoneNumber) {
-      throw new Error(`PVAPins purchase failed: ${JSON.stringify(data)}`);
-    }
-
-    return {
-      provider: "pvapins",
-      providerOrderId: String(providerOrderId),
-      phoneNumber: String(phoneNumber),
-      raw: {
-        ...data,
-        countryId: resolved.countryId,
-        appId: resolved.appId,
-        appName: resolved.appName
-      }
-    };
-  },
-
-  async buyRentalNumber({ country, service, operator }) {
-    const resolved = await resolvePvapinsServiceId(country, service);
-
-    const data = await pvapinsGet("get_number.php", {
-      customer: process.env.PVAPINS_API_KEY,
-      country: resolved.countryId,
-      app: resolved.appId,
-      type: "rent",
-      ...(operator ? { operator } : {})
-    });
-
-    const providerOrderId = data?.id || data?.order_id || data?.number;
-    const phoneNumber = data?.number;
-
-    if (!providerOrderId || !phoneNumber) {
-      throw new Error(`PVAPins rental purchase failed: ${JSON.stringify(data)}`);
-    }
-
-    return {
-      provider: "pvapins",
-      providerOrderId: String(providerOrderId),
-      phoneNumber: String(phoneNumber),
-      raw: {
-        ...data,
-        countryId: resolved.countryId,
-        appId: resolved.appId,
-        appName: resolved.appName
-      }
-    };
-  },
-
-  async checkSms({ phoneNumber, country, service, operator }) {
-    const resolved = await resolvePvapinsServiceId(country, service);
-
-    const data = await pvapinsGet("get_sms.php", {
-      customer: process.env.PVAPINS_API_KEY,
-      number: phoneNumber,
-      country: resolved.countryId,
-      app: resolved.appId,
-      ...(operator ? { operator } : {})
-    });
-
-    const otpCode = data?.sms || data?.code || data?.otp || "";
-
-    return {
-      provider: "pvapins",
-      status: otpCode ? "otp_received" : "waiting_sms",
-      otpCode: String(otpCode),
-      raw: data
-    };
-  },
-
-  async cancel({ providerOrderId, phoneNumber, country, service, operator }) {
-    return {
-      provider: "pvapins",
-      success: false,
-      raw: {
-        message: "PVAPins cancel endpoint is not wired yet",
-        providerOrderId,
-        phoneNumber,
-        country,
-        service,
+      console.log("PVAPINS BUY INPUT:", {
+        country: normalizedCountry,
+        service: normalizedService,
         operator
+      });
+
+      const requestParams = {
+        customer: process.env.PVAPINS_API_KEY,
+        country: normalizedCountry,
+        app: normalizedService
+      };
+
+      if (operator) {
+        requestParams.operator = operator;
       }
-    };
+
+      console.log("PVAPINS FINAL REQUEST:", requestParams);
+
+      const data = await pvapinsGet(
+        "get_number.php",
+        requestParams
+      );
+
+      console.log("PVAPINS RAW RESPONSE:", data);
+
+      /*
+        ==========================================
+        PVAPINS RETURNS RAW PHONE NUMBER STRING
+        Example:
+        93786831803
+        ==========================================
+      */
+
+      if (
+        typeof data === "string" ||
+        typeof data === "number"
+      ) {
+        const rawNumber = String(data).trim();
+
+        // provider errors
+        if (
+          rawNumber.toLowerCase().includes("not found") ||
+          rawNumber.toLowerCase().includes("error") ||
+          rawNumber.toLowerCase().includes("wait")
+        ) {
+          throw new Error(rawNumber);
+        }
+
+        // SUCCESS RESPONSE
+        if (/^\d+$/.test(rawNumber)) {
+          console.log("PVAPINS SUCCESS NUMBER:", rawNumber);
+
+          return {
+            provider: "pvapins",
+
+            // IMPORTANT:
+            // use number itself as providerOrderId
+            providerOrderId: rawNumber,
+
+            phoneNumber: rawNumber,
+
+            raw: {
+              number: rawNumber,
+              providerOrderId: rawNumber,
+              originalResponse: data
+            }
+          };
+        }
+      }
+
+      /*
+        JSON FALLBACK
+      */
+
+      if (typeof data === "object" && data !== null) {
+        const providerOrderId =
+          data.id ||
+          data.order_id ||
+          data.request_id ||
+          data.activation_id ||
+          data.number;
+
+        const phoneNumber =
+          data.number ||
+          data.phone ||
+          data.mobile ||
+          data.full_number;
+
+        console.log("PVAPINS EXTRACTED:", {
+          providerOrderId,
+          phoneNumber
+        });
+
+        if (providerOrderId && phoneNumber) {
+          return {
+            provider: "pvapins",
+            providerOrderId: String(providerOrderId),
+            phoneNumber: String(phoneNumber),
+            raw: data
+          };
+        }
+      }
+
+      throw new Error(
+        `Invalid PVAPINS response: ${JSON.stringify(data)}`
+      );
+    } catch (error) {
+      console.log("PVAPINS BUY ERROR:", error);
+
+      throw error;
+    }
+  },
+
+  async checkSms({
+    phoneNumber,
+    country,
+    service,
+    operator
+  }) {
+    try {
+      const normalizedCountry = String(country || "")
+        .trim()
+        .toLowerCase();
+
+      const normalizedService = String(service || "")
+        .trim()
+        .toLowerCase();
+
+      const requestParams = {
+        customer: process.env.PVAPINS_API_KEY,
+        number: phoneNumber,
+        country: normalizedCountry,
+        app: normalizedService
+      };
+
+      if (operator) {
+        requestParams.operator = operator;
+      }
+
+      const data = await pvapinsGet(
+        "get_sms.php",
+        requestParams
+      );
+
+      console.log("PVAPINS SMS RESPONSE:", data);
+
+      let otpCode = "";
+
+      if (typeof data === "string") {
+        if (
+          data.toLowerCase().includes("not received") ||
+          data.toLowerCase().includes("wait")
+        ) {
+          return {
+            provider: "pvapins",
+            status: "waiting_sms",
+            otpCode: "",
+            raw: data
+          };
+        }
+
+        const match = data.match(/\d{4,8}/);
+
+        if (match) {
+          otpCode = match[0];
+        }
+      }
+
+      if (typeof data === "object" && data !== null) {
+        otpCode =
+          data.sms ||
+          data.code ||
+          data.otp ||
+          "";
+      }
+
+      return {
+        provider: "pvapins",
+        status: otpCode
+          ? "otp_received"
+          : "waiting_sms",
+        otpCode: String(otpCode || ""),
+        raw: data
+      };
+    } catch (error) {
+      throw new Error(error.message);
+    }
+  },
+
+  async cancel({
+    phoneNumber,
+    country,
+    service,
+    operator
+  }) {
+    try {
+      const normalizedCountry = String(country || "")
+        .trim()
+        .toLowerCase();
+
+      const normalizedService = String(service || "")
+        .trim()
+        .toLowerCase();
+
+      const requestParams = {
+        customer: process.env.PVAPINS_API_KEY,
+        number: phoneNumber,
+        country: normalizedCountry,
+        app: normalizedService
+      };
+
+      if (operator) {
+        requestParams.operator = operator;
+      }
+
+      const data = await pvapinsGet(
+        "get_reject_number.php",
+        requestParams
+      );
+
+      console.log("PVAPINS CANCEL RESPONSE:", data);
+
+      return {
+        provider: "pvapins",
+        success: true,
+        raw: data
+      };
+    } catch (error) {
+      return {
+        provider: "pvapins",
+        success: false,
+        raw: {
+          error: error.message
+        }
+      };
+    }
   }
 };
