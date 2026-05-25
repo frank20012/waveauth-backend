@@ -147,80 +147,57 @@ export const pvapinsProvider = {
     return parseArrayResponse(data);
   },
 
+
   async getPrice({ country, service }) {
   try {
-    const normalizedCountry = String(country || "")
-      .trim();
+    const normalizedCountry = String(country || "").trim();
 
-    const normalizedService = String(service || "")
-      .trim()
-      .toLowerCase();
+    const rates = await pvapinsGet("get_rates.php", {
+      customer: process.env.PVAPINS_API_KEY,
+      country: normalizedCountry
+    });
 
-    const data = await pvapinsGet(
-      "get_rates.php",
-      {
-        customer: process.env.PVAPINS_API_KEY,
-        country: normalizedCountry
-      }
-    );
-
-    console.log("PVAPINS RATES RESPONSE:", data);
-
-    if (!Array.isArray(data)) {
+    if (!Array.isArray(rates)) {
       return {
         provider: "pvapins",
         providerPrice: 0,
         providerCurrency: "USD",
         stock: 0,
-        raw: data
+        raw: rates
       };
     }
 
-    const matchedService = data.find((item) => {
-      const appName = String(item.app || "")
-        .trim()
-        .toLowerCase();
+    const normalizedWanted = normalizeText(service);
 
+    const matched = rates.find((item) => {
       return (
-        appName === normalizedService ||
-        appName.includes(normalizedService)
+        normalizeText(item.app) === normalizedWanted
       );
     });
 
-    // SERVICE NOT FOUND
-    if (!matchedService) {
+    if (!matched) {
       return {
         provider: "pvapins",
         providerPrice: 0,
         providerCurrency: "USD",
         stock: 0,
         raw: {
-          message: "Service not found"
+          message: "Service not supported by PVAPINS"
         }
       };
     }
 
-    const providerPrice = Number(
-      matchedService.rate || 0
-    );
-
-    // PVAPINS API DOES NOT PROVIDE STOCK
-    // so assume available only if rate exists
-    const stock = providerPrice > 0 ? 1 : 0;
-
     return {
       provider: "pvapins",
-      providerPrice,
+      providerPrice: Number(matched.rate || 0),
       providerCurrency: "USD",
-      stock,
-      raw: matchedService
+
+      // PVAPINS does not expose stock
+      stock: 1,
+
+      raw: matched
     };
   } catch (error) {
-    console.log(
-      "PVAPINS GET PRICE ERROR:",
-      error.message
-    );
-
     return {
       provider: "pvapins",
       providerPrice: 0,

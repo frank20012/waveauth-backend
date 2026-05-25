@@ -3,8 +3,8 @@ import OtpOrder from "../models/OtpOrder.js";
 import Wallet from "../models/wallet.js";
 import Transaction from "../models/transaction.js";
 import {
-  getTemporaryActivationQuote,
-  buyTemporaryActivation,
+  getProviderSpecificQuote,
+  buyTemporaryActivationFromProvider,
   checkTemporaryActivationOtp,
   cancelTemporaryActivation
 } from "../services/activation.service.js";
@@ -28,9 +28,14 @@ export const buyOtpNumber = async (req, res) => {
 
   try {
     const userId = req.user._id;
-    const { country, serviceName, operator } = req.body;
+    const {
+  country,
+  serviceName,
+  operator,
+  provider
+} = req.body;
 
-    if (!country || !serviceName) {
+    if (!country || !serviceName || !provider) {
       return res.status(400).json({
         message: "Country and service name are required"
       });
@@ -47,20 +52,28 @@ export const buyOtpNumber = async (req, res) => {
         message: "Wallet not found"
       });
     }
+    const quote =
+  await getProviderSpecificQuote({
+    providerName: provider,
+    country: normalizedCountry,
+    service: normalizedService,
+    operator: normalizedOperator
+  });
 
-    const quote = await getTemporaryActivationQuote({
-      country: normalizedCountry,
-      service: normalizedService,
-      operator: normalizedOperator
-    });
+if (!quote?.available) {
+  return res.status(400).json({
+    success: false,
 
-    if (!quote || !quote.available) {
-      return res.status(400).json({
-        message:
-          quote?.message ||
-          "No provider could supply this temporary number right now"
-      });
-    }
+    requiresProviderSwitch: true,
+
+    message:
+      quote?.message ||
+      `No stock available in ${provider}`,
+
+    fallbackProviders:
+      quote?.fallbackProviders || []
+  });
+}
 
     const estimatedPrice = toMoneyNumber(quote.sellingPrice);
     const currentWalletBalance = toMoneyNumber(wallet.balance);
@@ -105,12 +118,33 @@ export const buyOtpNumber = async (req, res) => {
     let order = null;
 
     try {
-      order = await buyTemporaryActivation({
-        userId,
-        country: normalizedCountry,
-        service: normalizedService,
-        operator: normalizedOperator
-      });
+      const purchaseResult =
+  await buyTemporaryActivationFromProvider({
+    providerName: provider,
+    userId,
+    country: normalizedCountry,
+    service: normalizedService,
+    operator: normalizedOperator
+  });
+
+if (!purchaseResult.success) {
+  await Wallet.findOneAndUpdate(
+    { user: userId },
+    { $inc: { balance: estimatedPrice } },
+    { new: true }
+  );
+
+  return res.status(400).json({
+    success: false,
+    requiresProviderSwitch:
+      purchaseResult.requiresProviderSwitch,
+    message: purchaseResult.message,
+    fallbackProviders:
+      purchaseResult.fallbackProviders || []
+  });
+}
+
+order = purchaseResult.order;
     } catch (error) {
       await Wallet.findOneAndUpdate(
         { user: userId },

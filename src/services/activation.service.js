@@ -108,7 +108,231 @@ export const getTemporaryActivationQuote = async ({
     message: `No provider could supply this temporary number. ${errors.join(" | ")}`
   };
 };
+export const getProviderSpecificQuote = async ({
+  providerName,
+  country,
+  service,
+  operator
+}) => {
+  const provider = getProvider(providerName);
 
+  if (!provider) {
+    return {
+      available: false,
+      message: "Provider not found"
+    };
+  }
+
+  try {
+    const priceInfo = await provider.getPrice({
+      country,
+      service,
+      type: "temporary",
+      operator
+    });
+   
+
+    if (Number(priceInfo?.stock || 0) <= 0) {
+  const fallbackProviders =
+    await getFallbackProviders({
+      excludedProvider: providerName,
+      country,
+      service,
+      operator
+    });
+
+  return {
+    available: false,
+    provider: providerName,
+    message: `No stock available in ${providerName}`,
+    fallbackProviders
+  };
+}
+
+    const providerPrice = normalizeProviderPrice(priceInfo);
+
+    const providerCurrency =
+      normalizeProviderCurrency(priceInfo);
+
+    const sellingPrice = await buildSellingPrice(
+      providerPrice,
+      providerCurrency
+    );
+
+    return {
+      available: true,
+      provider: providerName,
+      providerPrice,
+      providerCurrency,
+      sellingPrice,
+      stock: Number(priceInfo?.stock || 0),
+      raw: priceInfo?.raw || {}
+    };
+  } catch (error) {
+    return {
+      available: false,
+      provider: providerName,
+      message: error.message
+    };
+  }
+};
+
+export const getFallbackProviders = async ({
+  excludedProvider,
+  country,
+  service,
+  operator
+}) => {
+  const providerNames = getProviderPriority("temporary");
+
+  const fallbackProviders = [];
+
+  for (const providerName of providerNames) {
+    if (providerName === excludedProvider) continue;
+
+    const quote = await getProviderSpecificQuote({
+      providerName,
+      country,
+      service,
+      operator
+    });
+
+    if (quote?.available) {
+      fallbackProviders.push({
+        provider: providerName,
+        price: Number(quote.sellingPrice || 0),
+        stock: Number(quote.stock || 0)
+      });
+    }
+  }
+
+  return fallbackProviders.sort(
+    (a, b) => Number(a.price) - Number(b.price)
+  );
+};
+export const buyTemporaryActivationFromProvider = async ({
+  providerName,
+  userId,
+  country,
+  service,
+  operator
+}) => {
+  const provider = getProvider(providerName);
+
+  if (!provider) {
+    throw new Error("Provider not found");
+  }
+
+  const priceInfo = await provider.getPrice({
+    country,
+    service,
+    type: "temporary",
+    operator
+  });
+
+  if (Number(priceInfo?.stock || 0) <= 0) {
+    const fallbackProviders =
+      await getFallbackProviders({
+        excludedProvider: providerName,
+        country,
+        service,
+        operator
+      });
+
+    return {
+      success: false,
+      requiresProviderSwitch: true,
+      message: `No number available in ${providerName}`,
+      fallbackProviders
+    };
+  }
+
+  const purchase =
+    await provider.buyTemporaryNumber({
+      country,
+      service,
+      operator
+    });
+
+  if (providerName === "pvapins") {
+    if (!purchase?.phoneNumber) {
+      throw new Error(
+        "PVAPINS did not return phone number"
+      );
+    }
+
+    purchase.providerOrderId =
+      purchase.providerOrderId ||
+      purchase.phoneNumber;
+  } else {
+    if (
+      !purchase?.phoneNumber ||
+      !purchase?.providerOrderId
+    ) {
+      throw new Error(
+        "Provider did not return number or order ID"
+      );
+    }
+  }
+
+  const liveProviderCost =
+    normalizeProviderPrice(priceInfo, purchase);
+
+  const liveProviderCurrency =
+    normalizeProviderCurrency(priceInfo, purchase);
+
+  const finalSellingPrice =
+    await buildSellingPrice(
+      liveProviderCost,
+      liveProviderCurrency
+    );
+
+  const order = await OtpOrder.create({
+    user: userId,
+    serviceName: String(service || "")
+      .trim()
+      .toLowerCase(),
+
+    country: String(country || "")
+      .trim()
+      .toLowerCase(),
+
+    assignedNumber: String(
+      purchase.phoneNumber || ""
+    ),
+
+    otpCode: "",
+
+    price: Number(finalSellingPrice || 0),
+
+    provider: providerName,
+
+    providerOrderId: String(
+      purchase.providerOrderId || ""
+    ),
+
+    providerOperator: operator || "",
+
+    providerCost: Number(
+      liveProviderCost || 0
+    ),
+
+    rawProviderResponse:
+      purchase.raw || {},
+
+    status: "active",
+
+    walletDebited: false,
+    chargedAmount: 0,
+    refundProcessed: false,
+    refundedAmount: 0
+  });
+
+  return {
+    success: true,
+    order
+  };
+};
 export const buyTemporaryActivation = async ({
   userId,
   country,

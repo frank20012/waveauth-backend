@@ -538,40 +538,18 @@ export const getJuicyCountryCode = (country) => {
   return JUICYSMS_COUNTRY_MAP[normalized] || null;
 };
 
+const normalizeText = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[^a-z0-9]/g, "");
+
 export const findJuicyService = (serviceName) => {
-  const normalizedTarget = normalizeJuicyServiceName(serviceName);
+  const normalized = normalizeText(serviceName);
 
-  if (!normalizedTarget) return null;
-
-  const exact = JUICYSMS_SERVICE_CATALOG.find(
-    (item) => normalizeJuicyServiceName(item.name) === normalizedTarget
+  return JUICYSMS_SERVICE_CATALOG.find(
+    (service) =>
+      normalizeText(service.name) === normalized
   );
-
-  if (exact) return exact;
-
-  const partial = JUICYSMS_SERVICE_CATALOG.find((item) => {
-    const normalizedName = normalizeJuicyServiceName(item.name);
-    return (
-      normalizedName.includes(normalizedTarget) ||
-      normalizedTarget.includes(normalizedName)
-    );
-  });
-
-  if (partial) return partial;
-
-  const splitMatch = JUICYSMS_SERVICE_CATALOG.find((item) => {
-    const variants = item.name
-      .split("/")
-      .map((part) => normalizeJuicyServiceName(part))
-      .filter(Boolean);
-
-    return variants.some(
-      (variant) =>
-        variant === normalizedTarget ||
-        variant.includes(normalizedTarget) ||
-        normalizedTarget.includes(variant)
-    );
-  });
-
-  return splitMatch || null;
 };

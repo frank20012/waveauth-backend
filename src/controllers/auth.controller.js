@@ -4,11 +4,82 @@ import Wallet from "../models/wallet.js";
 import generateToken from "../utils/generateToken.js";
 import crypto from "crypto";
 import { sendEmail } from "../utils/sendEmail.js";
+import { OAuth2Client } from "google-auth-library";
 
 const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 const isStrongPassword = (password) =>
   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/.test(password);
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
+
+
+
+export const googleAuth = async (req, res, next) => {
+  try {
+    const { credential } = req.body;
+
+    if (!credential) {
+      res.status(400);
+      throw new Error("Google credential missing");
+    }
+
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID
+    });
+
+    const payload = ticket.getPayload();
+
+    if (!payload) {
+      res.status(401);
+      throw new Error("Invalid Google token");
+    }
+
+    const {
+      sub,
+      email,
+      given_name,
+      family_name,
+      picture
+    } = payload;
+
+    let user = await User.findOne({
+      email: email.toLowerCase()
+    });
+
+    if (!user) {
+      user = await User.create({
+        firstName: given_name || "Google",
+        lastName: family_name || "User",
+        email: email.toLowerCase(),
+        password: "",
+        googleId: sub,
+        authProvider: "google",
+        avatar: picture || ""
+      });
+
+      await Wallet.create({
+        user: user._id,
+        balance: 0
+      });
+    }
+
+    res.status(200).json({
+      message: "Google authentication successful",
+      user: {
+        id: user._id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        role: user.role,
+        avatar: user.avatar
+      },
+      token: generateToken(user._id)
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 export const registerUser = async (req, res, next) => {
   try {
     const { firstName, lastName, email, password } = req.body;
